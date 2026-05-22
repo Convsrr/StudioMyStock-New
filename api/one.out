@@ -1,7 +1,0 @@
-replicate enabled: True
---- studio-white (harmonize=True) ---
-2026-05-20 23:02:18 [info     ] segment.start                  provider=picsart size=(958, 640)
-2026-05-20 23:02:22 [info     ] harmonize.start                aspect_ratio=match_input_image model=qwen/qwen-image-edit-2511 prompt_chars=725
-2026-05-20 23:02:44 [info     ] pipeline.done                  timings_ms={'decode': 245, 'segment': 3960, 'refine_mask': 61, 'compose': 75, 'harmonize': 22223, 'encode': 171}
-wrote /Users/ibi/StudioMyStock-NEW2/api/storage/smoke/harmonized_studio-white.jpg  1920x1280
-timings: {'decode': 245, 'segment': 3960, 'refine_mask': 61, 'compose': 75, 'harmonize': 22223, 'encode': 171}

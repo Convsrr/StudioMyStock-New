@@ -110,24 +110,9 @@ def add_shadow(
     shadow_y = contact_y_canvas - shadow_rgba.height // 6
 
     out = canvas.copy()
-    # Paste the shadow underneath the existing car composite. We can't truly
-    # "paint behind" so we composite shadow onto a fresh background copy and
-    # then re-paste the car on top.
-    from .. import backgrounds  # local import to avoid cycles
-    bg = backgrounds.get_background("studio-white", canvas.size).convert("RGBA")  # we don't actually use this
-    # Rebuild order: take a copy of canvas with the car region cleared back to bg,
-    # paste shadow, then paste car on top. But we don't have "canvas without car"
-    # easily. Workaround: paste shadow on top of a fresh canvas-sized transparent
-    # image, then composite that under the car region of canvas using the inverse
-    # of the car's alpha channel as a mask.
-
-    # Simpler and correct approach: paint shadow onto a transparent layer, then
-    # composite layer UNDER the car using PIL's Image.alpha_composite ordering.
-    # We achieve "under" by:
-    #   start with the canvas BEFORE the car was placed (we don't have it)
-    # So instead, let's just paste the shadow on top but with the car's alpha
-    # subtracted. That keeps the car visible and the shadow visible only where
-    # the car isn't.
+    # Paint shadow onto a transparent layer the size of the canvas, then
+    # composite it over the canvas with the car's alpha subtracted. This way
+    # the shadow appears only on the floor/wall regions, not on the car body.
     out_arr = np.asarray(out).copy()
     shadow_canvas = Image.new("RGBA", out.size, (0, 0, 0, 0))
     shadow_canvas.alpha_composite(shadow_rgba, (shadow_x, shadow_y))

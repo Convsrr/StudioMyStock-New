@@ -21,3 +21,6 @@ Thumbs.db
 # Project
 api/storage/
 *.log
+*.out
+.ruff_cache/
+.pytest_cache/
