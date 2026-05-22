@@ -1,0 +1,561 @@
+app/auth.py:23:16: UP007 [*] Use `X | Y` for type annotations
+   |
+22 | async def require_api_key(
+23 |     x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+   |                ^^^^^^^^^^^^^ UP007
+24 |     settings: Settings = Depends(get_settings),
+25 | ) -> Optional[str]:
+   |
+   = help: Convert to `X | Y`
+
+app/auth.py:24:26: B008 Do not perform function call `Depends` in argument defaults; instead, perform the call within the function, or read the default from a module-level singleton variable
+   |
+22 | async def require_api_key(
+23 |     x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+24 |     settings: Settings = Depends(get_settings),
+   |                          ^^^^^^^^^^^^^^^^^^^^^ B008
+25 | ) -> Optional[str]:
+26 |     """Validate the X-API-Key header. Returns the SHA-256 of the key, or None if auth is disabled."""
+   |
+
+app/auth.py:25:6: UP007 [*] Use `X | Y` for type annotations
+   |
+23 |     x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+24 |     settings: Settings = Depends(get_settings),
+25 | ) -> Optional[str]:
+   |      ^^^^^^^^^^^^^ UP007
+26 |     """Validate the X-API-Key header. Returns the SHA-256 of the key, or None if auth is disabled."""
+27 |     keys = settings.api_key_set
+   |
+   = help: Convert to `X | Y`
+
+app/db.py:7:34: F401 [*] `sqlalchemy.String` imported but unused
+  |
+5 | from datetime import datetime, timezone
+6 | 
+7 | from sqlalchemy import DateTime, String
+  |                                  ^^^^^^ F401
+8 | from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+9 | from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+  |
+  = help: Remove unused import: `sqlalchemy.String`
+
+app/db.py:19:25: UP017 [*] Use `datetime.UTC` alias
+   |
+18 | def _utcnow() -> datetime:
+19 |     return datetime.now(timezone.utc)
+   |                         ^^^^^^^^^^^^ UP017
+   |
+   = help: Convert to `datetime.UTC` alias
+
+app/main.py:10:51: F401 [*] `fastapi.HTTPException` imported but unused
+   |
+ 9 | import structlog
+10 | from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+   |                                                   ^^^^^^^^^^^^^ F401
+11 | from fastapi.middleware.cors import CORSMiddleware
+12 | from fastapi.responses import JSONResponse
+   |
+   = help: Remove unused import: `fastapi.HTTPException`
+
+app/main.py:149:28: B008 Do not perform function call `File` in argument defaults; instead, perform the call within the function, or read the default from a module-level singleton variable
+    |
+147 |     async def process_image(
+148 |         request: Request,
+149 |         file: UploadFile = File(...),
+    |                            ^^^^^^^^^ B008
+150 |         background: str = Form(...),
+151 |         relight: bool = Form(False),
+    |
+
+app/main.py:154:20: UP007 [*] Use `X | Y` for type annotations
+    |
+152 |         plate_blur: bool = Form(False),
+153 |         upscale: bool = Form(False),
+154 |         watermark: Optional[UploadFile] = File(default=None),
+    |                    ^^^^^^^^^^^^^^^^^^^^ UP007
+155 |         api_key_hash: Optional[str] = Depends(require_api_key),
+156 |         session: AsyncSession = Depends(session_dependency),
+    |
+    = help: Convert to `X | Y`
+
+app/main.py:154:43: B008 Do not perform function call `File` in argument defaults; instead, perform the call within the function, or read the default from a module-level singleton variable
+    |
+152 |         plate_blur: bool = Form(False),
+153 |         upscale: bool = Form(False),
+154 |         watermark: Optional[UploadFile] = File(default=None),
+    |                                           ^^^^^^^^^^^^^^^^^^ B008
+155 |         api_key_hash: Optional[str] = Depends(require_api_key),
+156 |         session: AsyncSession = Depends(session_dependency),
+    |
+
+app/main.py:155:23: UP007 [*] Use `X | Y` for type annotations
+    |
+153 |         upscale: bool = Form(False),
+154 |         watermark: Optional[UploadFile] = File(default=None),
+155 |         api_key_hash: Optional[str] = Depends(require_api_key),
+    |                       ^^^^^^^^^^^^^ UP007
+156 |         session: AsyncSession = Depends(session_dependency),
+157 |     ):
+    |
+    = help: Convert to `X | Y`
+
+app/main.py:156:33: B008 Do not perform function call `Depends` in argument defaults; instead, perform the call within the function, or read the default from a module-level singleton variable
+    |
+154 |         watermark: Optional[UploadFile] = File(default=None),
+155 |         api_key_hash: Optional[str] = Depends(require_api_key),
+156 |         session: AsyncSession = Depends(session_dependency),
+    |                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^ B008
+157 |     ):
+158 |         if not backgrounds.is_valid(background):
+    |
+
+app/main.py:186:24: UP007 [*] Use `X | Y` for type annotations
+    |
+184 |             suffix = ".jpg"
+185 |         input_key = f"uploads/{job_id}{suffix}"
+186 |         watermark_key: Optional[str] = None
+    |                        ^^^^^^^^^^^^^ UP007
+187 | 
+188 |         await storage.put(input_key, body, file.content_type or "image/jpeg")
+    |
+    = help: Convert to `X | Y`
+
+app/main.py:218:33: B008 Do not perform function call `Depends` in argument defaults; instead, perform the call within the function, or read the default from a module-level singleton variable
+    |
+216 |     async def get_job(
+217 |         job_id: str,
+218 |         session: AsyncSession = Depends(session_dependency),
+    |                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^ B008
+219 |         _: Optional[str] = Depends(require_api_key),
+220 |     ):
+    |
+
+app/main.py:219:12: UP007 [*] Use `X | Y` for type annotations
+    |
+217 |         job_id: str,
+218 |         session: AsyncSession = Depends(session_dependency),
+219 |         _: Optional[str] = Depends(require_api_key),
+    |            ^^^^^^^^^^^^^ UP007
+220 |     ):
+221 |         repo = JobRepository(session)
+    |
+    = help: Convert to `X | Y`
+
+app/models.py:26:26: UP007 [*] Use `X | Y` for type annotations
+   |
+25 |     id: Mapped[str] = mapped_column(String(32), primary_key=True)
+26 |     api_key_hash: Mapped[Optional[str]] = mapped_column(String(64), index=True)
+   |                          ^^^^^^^^^^^^^ UP007
+27 |     status: Mapped[JobStatus] = mapped_column(
+28 |         Enum(JobStatus, name="job_status"), default=JobStatus.pending, nullable=False, index=True
+   |
+   = help: Convert to `X | Y`
+
+app/models.py:35:27: UP007 [*] Use `X | Y` for type annotations
+   |
+33 |     plate_blur: Mapped[bool] = mapped_column(default=False, nullable=False)
+34 |     upscale: Mapped[bool] = mapped_column(default=False, nullable=False)
+35 |     watermark_key: Mapped[Optional[str]] = mapped_column(String(255))
+   |                           ^^^^^^^^^^^^^ UP007
+36 | 
+37 |     input_key: Mapped[str] = mapped_column(String(255), nullable=False)
+   |
+   = help: Convert to `X | Y`
+
+app/models.py:38:24: UP007 [*] Use `X | Y` for type annotations
+   |
+37 |     input_key: Mapped[str] = mapped_column(String(255), nullable=False)
+38 |     output_key: Mapped[Optional[str]] = mapped_column(String(255))
+   |                        ^^^^^^^^^^^^^ UP007
+39 |     original_url: Mapped[str] = mapped_column(String(1024), nullable=False)
+40 |     result_url: Mapped[Optional[str]] = mapped_column(String(1024))
+   |
+   = help: Convert to `X | Y`
+
+app/models.py:40:24: UP007 [*] Use `X | Y` for type annotations
+   |
+38 |     output_key: Mapped[Optional[str]] = mapped_column(String(255))
+39 |     original_url: Mapped[str] = mapped_column(String(1024), nullable=False)
+40 |     result_url: Mapped[Optional[str]] = mapped_column(String(1024))
+   |                        ^^^^^^^^^^^^^ UP007
+41 | 
+42 |     input_hash: Mapped[Optional[str]] = mapped_column(String(64), index=True)
+   |
+   = help: Convert to `X | Y`
+
+app/models.py:42:24: UP007 [*] Use `X | Y` for type annotations
+   |
+40 |     result_url: Mapped[Optional[str]] = mapped_column(String(1024))
+41 | 
+42 |     input_hash: Mapped[Optional[str]] = mapped_column(String(64), index=True)
+   |                        ^^^^^^^^^^^^^ UP007
+43 |     params_hash: Mapped[Optional[str]] = mapped_column(String(64), index=True)
+   |
+   = help: Convert to `X | Y`
+
+app/models.py:43:25: UP007 [*] Use `X | Y` for type annotations
+   |
+42 |     input_hash: Mapped[Optional[str]] = mapped_column(String(64), index=True)
+43 |     params_hash: Mapped[Optional[str]] = mapped_column(String(64), index=True)
+   |                         ^^^^^^^^^^^^^ UP007
+44 | 
+45 |     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+   |
+   = help: Convert to `X | Y`
+
+app/models.py:45:24: UP007 [*] Use `X | Y` for type annotations
+   |
+43 |     params_hash: Mapped[Optional[str]] = mapped_column(String(64), index=True)
+44 | 
+45 |     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+   |                        ^^^^^^^^^^^^^^^^^^ UP007
+46 |     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+47 |     duration_ms: Mapped[Optional[int]] = mapped_column(Integer)
+   |
+   = help: Convert to `X | Y`
+
+app/models.py:46:25: UP007 [*] Use `X | Y` for type annotations
+   |
+45 |     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+46 |     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+   |                         ^^^^^^^^^^^^^^^^^^ UP007
+47 |     duration_ms: Mapped[Optional[int]] = mapped_column(Integer)
+   |
+   = help: Convert to `X | Y`
+
+app/models.py:47:25: UP007 [*] Use `X | Y` for type annotations
+   |
+45 |     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+46 |     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+47 |     duration_ms: Mapped[Optional[int]] = mapped_column(Integer)
+   |                         ^^^^^^^^^^^^^ UP007
+48 | 
+49 |     error_code: Mapped[Optional[str]] = mapped_column(String(64))
+   |
+   = help: Convert to `X | Y`
+
+app/models.py:49:24: UP007 [*] Use `X | Y` for type annotations
+   |
+47 |     duration_ms: Mapped[Optional[int]] = mapped_column(Integer)
+48 | 
+49 |     error_code: Mapped[Optional[str]] = mapped_column(String(64))
+   |                        ^^^^^^^^^^^^^ UP007
+50 |     error_message: Mapped[Optional[str]] = mapped_column(Text)
+51 |     stage_timings: Mapped[Optional[dict]] = mapped_column(JSON)
+   |
+   = help: Convert to `X | Y`
+
+app/models.py:50:27: UP007 [*] Use `X | Y` for type annotations
+   |
+49 |     error_code: Mapped[Optional[str]] = mapped_column(String(64))
+50 |     error_message: Mapped[Optional[str]] = mapped_column(Text)
+   |                           ^^^^^^^^^^^^^ UP007
+51 |     stage_timings: Mapped[Optional[dict]] = mapped_column(JSON)
+52 |     attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+   |
+   = help: Convert to `X | Y`
+
+app/models.py:51:27: UP007 [*] Use `X | Y` for type annotations
+   |
+49 |     error_code: Mapped[Optional[str]] = mapped_column(String(64))
+50 |     error_message: Mapped[Optional[str]] = mapped_column(Text)
+51 |     stage_timings: Mapped[Optional[dict]] = mapped_column(JSON)
+   |                           ^^^^^^^^^^^^^^ UP007
+52 |     attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+   |
+   = help: Convert to `X | Y`
+
+app/pipeline/compose.py:4:1: UP035 `typing.Tuple` is deprecated, use `tuple` instead
+  |
+2 | from __future__ import annotations
+3 | 
+4 | from typing import Tuple
+  | ^^^^^^^^^^^^^^^^^^^^^^^^ UP035
+5 | 
+6 | from PIL import Image
+  |
+
+app/pipeline/compose.py:11:67: UP006 [*] Use `tuple` instead of `Tuple` for type annotation
+   |
+11 | def compose(cutout: Image.Image, background_id: str, canvas_size: Tuple[int, int] = (1920, 1280)) -> Tuple[Image.Image, Tuple[int, int, int, int]]:
+   |                                                                   ^^^^^ UP006
+12 |     """Place the car on the chosen background. Returns (rgba_canvas, car_box)."""
+13 |     target_w, target_h = canvas_size
+   |
+   = help: Replace with `tuple`
+
+app/pipeline/compose.py:11:102: UP006 [*] Use `tuple` instead of `Tuple` for type annotation
+   |
+11 | def compose(cutout: Image.Image, background_id: str, canvas_size: Tuple[int, int] = (1920, 1280)) -> Tuple[Image.Image, Tuple[int, int, int, int]]:
+   |                                                                                                      ^^^^^ UP006
+12 |     """Place the car on the chosen background. Returns (rgba_canvas, car_box)."""
+13 |     target_w, target_h = canvas_size
+   |
+   = help: Replace with `tuple`
+
+app/pipeline/compose.py:11:121: UP006 [*] Use `tuple` instead of `Tuple` for type annotation
+   |
+11 | def compose(cutout: Image.Image, background_id: str, canvas_size: Tuple[int, int] = (1920, 1280)) -> Tuple[Image.Image, Tuple[int, int, int, int]]:
+   |                                                                                                                         ^^^^^ UP006
+12 |     """Place the car on the chosen background. Returns (rgba_canvas, car_box)."""
+13 |     target_w, target_h = canvas_size
+   |
+   = help: Replace with `tuple`
+
+app/pipeline/orchestrator.py:2:1: I001 [*] Import block is un-sorted or un-formatted
+   |
+ 1 |   """Pipeline orchestrator: runs stages in order, records timings, returns the result."""
+ 2 | / from __future__ import annotations
+ 3 | | 
+ 4 | | import io
+ 5 | | import time
+ 6 | | from dataclasses import dataclass, field
+ 7 | | from typing import Optional
+ 8 | | 
+ 9 | | from PIL import Image
+10 | | 
+11 | | from ..errors import PipelineError
+12 | | from ..logging_setup import get_logger
+13 | | from ..settings import get_settings
+14 | | from . import (
+15 | |     color_match,
+16 | |     compose,
+17 | |     decode,
+18 | |     plate_blur,
+19 | |     refine_mask,
+20 | |     relight as relight_stage,
+21 | |     segment,
+22 | |     shadow,
+23 | |     upscale as upscale_stage,
+24 | |     watermark as watermark_stage,
+25 | | )
+26 | | 
+27 | | log = get_logger(__name__)
+   | |_^ I001
+   |
+   = help: Organize imports
+
+app/pipeline/orchestrator.py:36:22: UP007 [*] Use `X | Y` for type annotations
+   |
+34 |     plate_blur: bool = False
+35 |     upscale: bool = False
+36 |     watermark_bytes: Optional[bytes] = None
+   |                      ^^^^^^^^^^^^^^^ UP007
+   |
+   = help: Convert to `X | Y`
+
+app/pipeline/orchestrator.py:142:28: UP037 [*] Remove quotes from type annotation
+    |
+140 |         self.t0 = 0.0
+141 | 
+142 |     def __enter__(self) -> "_StageTimer":
+    |                            ^^^^^^^^^^^^^ UP037
+143 |         self.t0 = time.perf_counter()
+144 |         return self
+    |
+    = help: Remove quotes
+
+app/pipeline/plate_blur.py:57:16: UP038 Use `X | Y` in `isinstance` call instead of `(X, Y)`
+   |
+55 |         for item in result:
+56 |             box = item.get("box") or item.get("bbox")
+57 |             if isinstance(box, (list, tuple)) and len(box) == 4:
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ UP038
+58 |                 boxes.append(tuple(int(v) for v in box))  # type: ignore[arg-type]
+59 |         return boxes
+   |
+   = help: Convert to `X | Y`
+
+app/pipeline/shadow.py:10:24: F401 [*] `PIL.ImageDraw` imported but unused
+   |
+ 8 | from __future__ import annotations
+ 9 | 
+10 | from PIL import Image, ImageDraw, ImageFilter
+   |                        ^^^^^^^^^ F401
+   |
+   = help: Remove unused import: `PIL.ImageDraw`
+
+app/pipeline/types.py:19:22: UP007 [*] Use `X | Y` for type annotations
+   |
+17 |     plate_blur: bool = False
+18 |     upscale: bool = False
+19 |     watermark_bytes: Optional[bytes] = None
+   |                      ^^^^^^^^^^^^^^^ UP007
+20 | 
+21 |     # Set by stages
+   |
+   = help: Convert to `X | Y`
+
+app/pipeline/types.py:22:13: UP007 [*] Use `X | Y` for type annotations
+   |
+21 |     # Set by stages
+22 |     source: Optional[Image.Image] = None  # working RGB
+   |             ^^^^^^^^^^^^^^^^^^^^^ UP007
+23 |     cutout: Optional[Image.Image] = None  # RGBA car cutout (trimmed)
+24 |     composite: Optional[Image.Image] = None  # RGB composite
+   |
+   = help: Convert to `X | Y`
+
+app/pipeline/types.py:23:13: UP007 [*] Use `X | Y` for type annotations
+   |
+21 |     # Set by stages
+22 |     source: Optional[Image.Image] = None  # working RGB
+23 |     cutout: Optional[Image.Image] = None  # RGBA car cutout (trimmed)
+   |             ^^^^^^^^^^^^^^^^^^^^^ UP007
+24 |     composite: Optional[Image.Image] = None  # RGB composite
+25 |     final: Optional[Image.Image] = None  # RGB output
+   |
+   = help: Convert to `X | Y`
+
+app/pipeline/types.py:24:16: UP007 [*] Use `X | Y` for type annotations
+   |
+22 |     source: Optional[Image.Image] = None  # working RGB
+23 |     cutout: Optional[Image.Image] = None  # RGBA car cutout (trimmed)
+24 |     composite: Optional[Image.Image] = None  # RGB composite
+   |                ^^^^^^^^^^^^^^^^^^^^^ UP007
+25 |     final: Optional[Image.Image] = None  # RGB output
+   |
+   = help: Convert to `X | Y`
+
+app/pipeline/types.py:25:12: UP007 [*] Use `X | Y` for type annotations
+   |
+23 |     cutout: Optional[Image.Image] = None  # RGBA car cutout (trimmed)
+24 |     composite: Optional[Image.Image] = None  # RGB composite
+25 |     final: Optional[Image.Image] = None  # RGB output
+   |            ^^^^^^^^^^^^^^^^^^^^^ UP007
+26 | 
+27 |     timings_ms: dict[str, int] = field(default_factory=dict)
+   |
+   = help: Convert to `X | Y`
+
+app/queue.py:16:8: UP007 [*] Use `X | Y` for type annotations
+   |
+16 | _pool: Optional[ArqRedis] = None
+   |        ^^^^^^^^^^^^^^^^^^ UP007
+   |
+   = help: Convert to `X | Y`
+
+app/repositories.py:15:25: UP017 [*] Use `datetime.UTC` alias
+   |
+14 | def _utcnow() -> datetime:
+15 |     return datetime.now(timezone.utc)
+   |                         ^^^^^^^^^^^^ UP017
+   |
+   = help: Convert to `datetime.UTC` alias
+
+app/repositories.py:35:50: UP007 [*] Use `X | Y` for type annotations
+   |
+33 |         return job
+34 | 
+35 |     async def get_optional(self, job_id: str) -> Optional[Job]:
+   |                                                  ^^^^^^^^^^^^^ UP007
+36 |         return await self.session.get(Job, job_id)
+   |
+   = help: Convert to `X | Y`
+
+app/repositories.py:38:82: UP007 [*] Use `X | Y` for type annotations
+   |
+36 |         return await self.session.get(Job, job_id)
+37 | 
+38 |     async def find_succeeded_by_hash(self, input_hash: str, params_hash: str) -> Optional[Job]:
+   |                                                                                  ^^^^^^^^^^^^^ UP007
+39 |         stmt = select(Job).where(
+40 |             Job.input_hash == input_hash,
+   |
+   = help: Convert to `X | Y`
+
+app/schemas.py:36:17: UP007 [*] Use `X | Y` for type annotations
+   |
+34 |     upscale: bool
+35 |     original_url: str
+36 |     result_url: Optional[str] = None
+   |                 ^^^^^^^^^^^^^ UP007
+37 |     error_code: Optional[str] = None
+38 |     error_message: Optional[str] = None
+   |
+   = help: Convert to `X | Y`
+
+app/schemas.py:37:17: UP007 [*] Use `X | Y` for type annotations
+   |
+35 |     original_url: str
+36 |     result_url: Optional[str] = None
+37 |     error_code: Optional[str] = None
+   |                 ^^^^^^^^^^^^^ UP007
+38 |     error_message: Optional[str] = None
+39 |     duration_ms: Optional[int] = None
+   |
+   = help: Convert to `X | Y`
+
+app/schemas.py:38:20: UP007 [*] Use `X | Y` for type annotations
+   |
+36 |     result_url: Optional[str] = None
+37 |     error_code: Optional[str] = None
+38 |     error_message: Optional[str] = None
+   |                    ^^^^^^^^^^^^^ UP007
+39 |     duration_ms: Optional[int] = None
+40 |     stage_timings: Optional[dict[str, int]] = None
+   |
+   = help: Convert to `X | Y`
+
+app/schemas.py:39:18: UP007 [*] Use `X | Y` for type annotations
+   |
+37 |     error_code: Optional[str] = None
+38 |     error_message: Optional[str] = None
+39 |     duration_ms: Optional[int] = None
+   |                  ^^^^^^^^^^^^^ UP007
+40 |     stage_timings: Optional[dict[str, int]] = None
+41 |     created_at: datetime
+   |
+   = help: Convert to `X | Y`
+
+app/schemas.py:40:20: UP007 [*] Use `X | Y` for type annotations
+   |
+38 |     error_message: Optional[str] = None
+39 |     duration_ms: Optional[int] = None
+40 |     stage_timings: Optional[dict[str, int]] = None
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^ UP007
+41 |     created_at: datetime
+42 |     updated_at: datetime
+   |
+   = help: Convert to `X | Y`
+
+app/schemas.py:43:18: UP007 [*] Use `X | Y` for type annotations
+   |
+41 |     created_at: datetime
+42 |     updated_at: datetime
+43 |     finished_at: Optional[datetime] = None
+   |                  ^^^^^^^^^^^^^^^^^^ UP007
+   |
+   = help: Convert to `X | Y`
+
+app/storage.py:113:11: UP007 [*] Use `X | Y` for type annotations
+    |
+113 | _storage: Optional[Storage] = None
+    |           ^^^^^^^^^^^^^^^^^ UP007
+    |
+    = help: Convert to `X | Y`
+
+app/worker.py:8:8: F401 [*] `asyncio` imported but unused
+   |
+ 6 | from __future__ import annotations
+ 7 | 
+ 8 | import asyncio
+   |        ^^^^^^^ F401
+ 9 | 
+10 | from arq.connections import RedisSettings
+   |
+   = help: Remove unused import: `asyncio`
+
+app/worker.py:11:36: F401 [*] `sqlalchemy.ext.asyncio.AsyncSession` imported but unused
+   |
+10 | from arq.connections import RedisSettings
+11 | from sqlalchemy.ext.asyncio import AsyncSession
+   |                                    ^^^^^^^^^^^^ F401
+12 | 
+13 | from .db import get_sessionmaker, init_db
+   |
+   = help: Remove unused import: `sqlalchemy.ext.asyncio.AsyncSession`
+
+Found 53 errors.
+[*] 46 fixable with the `--fix` option (1 hidden fix can be enabled with the `--unsafe-fixes` option).
