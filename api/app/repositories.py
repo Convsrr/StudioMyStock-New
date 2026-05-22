@@ -52,6 +52,26 @@ class JobRepository:
         ).limit(1)
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    async def find_existing_by_hash(self, input_hash: str, params_hash: str) -> Optional[Job]:
+        """Return any reusable job (pending, running, or succeeded) for this hash pair.
+
+        Failed or cancelled jobs are intentionally excluded so retries are allowed.
+        Prefers the most recently created reusable job.
+        """
+        stmt = (
+            select(Job)
+            .where(
+                Job.input_hash == input_hash,
+                Job.params_hash == params_hash,
+                Job.status.in_(
+                    [JobStatus.pending, JobStatus.running, JobStatus.succeeded]
+                ),
+            )
+            .order_by(Job.created_at.desc())
+            .limit(1)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
     async def mark_running(self, job_id: str) -> None:
         job = await self.get(job_id)
         job.status = JobStatus.running

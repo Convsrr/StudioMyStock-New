@@ -100,15 +100,26 @@ async def run_pipeline(input_bytes: bytes, params: PipelineParams) -> PipelineRe
             # We send Qwen the FULL composite (car + shadow + scene) and ask it
             # only to harmonize the lighting on the car body. We then re-paste
             # the original car so identity is guaranteed.
+            #
+            # Keep a copy of the deterministic pre-harmonize composite so we
+            # can use it as the safe background base when preserve_car is on.
+            # That guarantees any duplicate/ghost car Qwen may hallucinate
+            # outside the original car region cannot survive into the output.
+            pre_harmonize_rgb = composite.convert("RGB")
             with _stage("harmonize"):
                 rgb = await harmonize_stage.harmonize(
-                    composite.convert("RGB"),
+                    pre_harmonize_rgb,
                     params.background_id,
                     extra_prompt=params.extra_prompt,
                 )
             if params.preserve_car:
                 with _stage("preserve_car"):
-                    rgb = preserve_car_stage.preserve_car(rgb, cutout, car_box)
+                    rgb = preserve_car_stage.preserve_car(
+                        rgb,
+                        cutout,
+                        car_box,
+                        safe_base=pre_harmonize_rgb,
+                    )
             composite_rgb = rgb
         else:
             # Classical fallback path

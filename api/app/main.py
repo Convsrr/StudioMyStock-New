@@ -245,16 +245,27 @@ def _register_routes(app: FastAPI) -> None:
         storage = get_storage()
         repo = JobRepository(session)
 
-        # Idempotency: same input + same params returns the existing successful job.
+        # Idempotency: same input + same params returns the existing reusable job.
+        # Reusable means pending, running, or succeeded. Failed/cancelled jobs do
+        # not block retries.
         input_hash = hashlib.sha256(body).hexdigest()
         params_hash = hashlib.sha256(
             f"{background}|{harmonize}|{preserve_car}|{relight}|{plate_blur}|{upscale}|{extra_prompt or ''}".encode()
         ).hexdigest()
 
-        cached = await repo.find_succeeded_by_hash(input_hash, params_hash)
-        if cached:
+        existing = await repo.find_existing_by_hash(input_hash, params_hash)
+        if existing:
             JOBS_CACHE_HIT.inc()
-            return JobCreatedResponse(job_id=cached.id, status=cached.status, cached=True)
+            # cached=True for any reused job (so existing clients keep working).
+            # reused=True specifically means an in-flight job (pending/running) was
+            # reused rather than a succeeded result.
+            is_succeeded = existing.status == JobStatus.succeeded
+            return JobCreatedResponse(
+                job_id=existing.id,
+                status=existing.status,
+                cached=True,
+                reused=not is_succeeded,
+            )
 
         job_id = uuid.uuid4().hex
         suffix = Path(file.filename or "").suffix.lower() or ".jpg"

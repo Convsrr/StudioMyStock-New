@@ -22,7 +22,14 @@ class BackgroundsResponse(BaseModel):
 class JobCreatedResponse(BaseModel):
     job_id: str
     status: JobStatus
-    cached: bool = Field(default=False, description="True if served from idempotency cache")
+    cached: bool = Field(
+        default=False,
+        description="True if served from idempotency cache (any reused job: pending, running, or succeeded)",
+    )
+    reused: bool = Field(
+        default=False,
+        description="True if an existing pending or running job was reused (vs cached succeeded result)",
+    )
 
 
 class JobOut(BaseModel):

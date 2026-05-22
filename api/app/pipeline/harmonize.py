@@ -77,6 +77,14 @@ def _build_prompt(background_id: str, extra: Optional[str] = None) -> str:
         "Only adjust the lighting and ambient reflections on the car body so it "
         "matches the studio lighting. Keep the car's paint colour, badges, license "
         "plate digits, wheels, and trim exactly as they appear in the input.",
+        # Hard anti-duplication clauses. Qwen sometimes hallucinates a "reflection"
+        # or a second car in the floor/wall - explicitly forbid this.
+        "Do not create reflections that look like a second car. "
+        "Do not create duplicate silhouettes, ghost cars, mirror copies, "
+        "or extra wheels anywhere in the frame. "
+        "Do not change the floor or background layout. "
+        "Only adjust lighting and ambient colour on the existing car and scene.",
+        _PRESERVE_INSTRUCTIONS,
         "Output: the same image with subtly improved lighting on the car only.",
     ]
     if extra:
