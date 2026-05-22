@@ -1,27 +1,55 @@
 # StudioMyStock
 
-Turn raw car photos into studio-quality images with swappable backgrounds.
+Turn raw car photos into studio-quality images with swappable backgrounds. Built for dealerships and marketplaces that want catalog-grade product shots without renting a studio.
 
-This is a prototype scaffold. It is intentionally minimal so you can iterate on the AI pipeline without fighting infrastructure.
+The pipeline cuts the car out of the source photo, drops it onto a chosen studio background, generates a perspective-correct shadow, then uses Qwen Image Edit to harmonize the lighting before pasting the original car pixels back on top so the make/model/plate/badges are pixel-identical.
 
-## Architecture
+## Repo layout
 
 ```
+api/   FastAPI backend, async pipeline, job queue, storage
 web/   Next.js 14 (App Router) frontend
-api/   FastAPI backend that orchestrates the AI pipeline via Replicate
 ```
 
-The pipeline runs synchronously for now via FastAPI background tasks. Swap in Redis + a worker (RQ, Celery, or Arq) once you have real volume.
+## Studio backgrounds
 
-## AI pipeline (current prototype)
+Five presets ship with the app:
 
-1. Background removal (Replicate: `851-labs/background-remover`)
-2. Compositing onto a preset studio background (Pillow, server-side)
-3. Optional relighting pass (Replicate: `zsxkib/ic-light`) so the car matches the new scene
+| ID | Name | Mood |
+|----|------|------|
+| `studio-white` | Studio White | Clean white cyc, light concrete floor |
+| `studio-grey` | Studio Grey | Light cyc, mid-grey tile floor |
+| `studio-charcoal` | Studio Charcoal | Moody dark cyc, polished black floor |
+| `studio-warm` | Studio Warm | Warm cream cyc, sandstone floor |
+| `studio-blueprint` | Studio Blueprint | Cool blue-tinted cyc, light tile floor |
 
-Each stage is a function in `api/app/pipeline.py`. Add scratch removal, plate blur, upscaling, etc. as additional stages.
+Each preset carries a scene prompt and a floor-line ratio so the car gets anchored at the right horizon.
+
+## Pipeline at a glance
+
+1. **decode** — load and normalize the input image
+2. **segment** — background removal (Picsart by default, Replicate as fallback)
+3. **refine_mask** — feather and clean the alpha edge
+4. **compose** — anchor the wheel contact line to the preset's floor line
+5. **shadow** — synthesize a real perspective shadow from the silhouette
+6. **harmonize** — Qwen Image Edit 2511 (Replicate) relights the whole composite
+7. **preserve_car** — paste the original car pixels back over the harmonized scene
+8. **plate_blur** *(optional)* — blur visible license plates
+9. **upscale** *(optional)* — Real-ESRGAN
+10. **watermark** *(optional)* — overlay a user-supplied logo
+11. **encode** — JPEG output (configurable quality)
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for how the stages fit together and how the system handles jobs, storage, and failures. See [BUSINESS_DNA.md](./BUSINESS_DNA.md) for the product positioning and the principles every change should pass.
 
 ## Quick start
+
+### Prereqs
+
+- Python 3.11+
+- Node 18+
+- A Replicate API token (for harmonize / segmentation fallback / optional upscale)
+- A Picsart API key (recommended for primary segmentation)
+- Optional: Redis if you want a real worker queue. Without Redis, processing runs inline via FastAPI background tasks.
 
 ### 1. Backend
 
@@ -30,11 +58,20 @@ cd api
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # add your REPLICATE_API_TOKEN
+cp .env.example .env
+# Fill in REPLICATE_API_TOKEN and PICSART_API_KEY in .env
 ./run.sh
 ```
 
 API runs on http://localhost:8000.
+
+If you want a worker queue, also start Redis (`brew services start redis`) and run:
+
+```bash
+./run-worker.sh
+```
+
+If Redis isn't reachable, the API silently falls back to inline processing — fine for dev, fine for single-host deployments.
 
 ### 2. Frontend
 
@@ -47,18 +84,42 @@ npm run dev
 
 App runs on http://localhost:3000.
 
-## Endpoints
+## API
 
-- `POST /api/process` — multipart upload (`file`, `background`, `relight`) returns `{ job_id }`
-- `GET /api/jobs/{job_id}` — returns `{ status, result_url, original_url }`
-- `GET /api/backgrounds` — list available preset backgrounds
-- `GET /static/<path>` — serves uploaded and processed images
+| Method | Path | Notes |
+|--------|------|-------|
+| `POST` | `/api/process` | Multipart upload. Form fields: `file`, `background`, `harmonize`, `preserve_car`, `relight`, `plate_blur`, `upscale`, `extra_prompt`, optional `watermark` file. Returns `{ job_id, status, cached }`. |
+| `GET`  | `/api/jobs/{id}` | Returns full job status, stage timings, `result_url`, `original_url`, error details. |
+| `GET`  | `/api/backgrounds` | Lists available presets. |
+| `GET`  | `/api/health` | Reports Replicate config, queue connectivity, storage backend. |
+| `GET`  | `/metrics` | Prometheus exposition. |
+| `GET`  | `/static/<path>` | Serves uploads and outputs when `STORAGE_BACKEND=local`. |
 
-## What to build next
+Auth: set `API_KEYS=key1,key2` in env to require an `X-API-Key` header. Empty value disables auth (dev only).
 
-- Replace synchronous processing with a queue and worker pool
-- Swap in a custom-trained relighting model (IC-Light is fine to start, not great for paint)
-- Add bulk upload (the dealership use case)
-- Add brand presets (saved background + watermark + crop config)
-- Add S3/R2 storage instead of local disk
-- Add auth (Clerk) and billing (Stripe) once the output quality is good enough to charge for
+Idempotency: identical input bytes + identical params return the previously succeeded job instead of creating a new one.
+
+## Configuration
+
+The full set of env keys is in [`api/.env.example`](./api/.env.example). Highlights:
+
+- `REPLICATE_API_TOKEN`, `PICSART_API_KEY` — provider credentials
+- `SEGMENTATION_PROVIDER` — `auto` (default), `picsart`, `replicate`, or `none`
+- `INLINE_PROCESSING` — `true` to bypass Redis even when configured
+- `STORAGE_BACKEND` — `local` or `s3` (S3-compatible: AWS, R2, MinIO)
+- `RATE_LIMIT_PER_MINUTE` — per-IP rate limit on `/api/process`
+- `JPEG_QUALITY`, `OUTPUT_MAX_DIM` — output quality knobs
+
+## Tests
+
+```bash
+cd api
+source .venv/bin/activate
+pytest -q
+```
+
+Tests use a temporary SQLite DB and stub external providers, so no API keys are required to run them.
+
+## License
+
+Proprietary.
