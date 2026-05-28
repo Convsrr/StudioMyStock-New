@@ -38,6 +38,75 @@ from .storage import get_storage
 
 log = get_logger(__name__)
 
+# Bump this whenever the rendering pipeline changes in a way that would make
+# previously-cached outputs visually different. It is mixed into params_hash so
+# old succeeded jobs are not reused after a meaningful pipeline change.
+#
+# History:
+#   v1 - initial release
+#   v2 - 2026-05-22: removed safe_base default in preserve_car so Qwen's
+#        harmonized image is the canvas again (was producing flat,
+#        pasted-looking results)
+#   v3 - 2026-05-22: preserve_car uses ghost_guard halo to override Qwen
+#        within a feathered ring around the car silhouette, killing
+#        duplicate plates / ghost bumpers without flattening the scene
+#   v4 - 2026-05-22: tighter Qwen prompt (no plates, no bumper extension,
+#        nothing inside silhouette), refine_mask fills interior alpha
+#        holes, ghost_guard halo extended downward to cover floor zone
+#   v5 - 2026-05-22: scene-only mode - car is painted out of Qwen's input
+#        so it builds an empty studio with no vehicle to duplicate. Real
+#        car is pasted back via preserve_car. Eliminates the duplicate-car
+#        failure mode at the source.
+#   v6 - 2026-05-22: shadow is now a separate alpha mask applied
+#        multiplicatively to Qwen's harmonized floor in preserve_car, so
+#        the contact shadow lands on the real studio floor instead of
+#        being erased by ghost_guard or pre-baked into the deterministic
+#        background. Fixes the "car looks like a sticker" problem.
+#   v7 - 2026-05-22: switch to Qwen Image Edit 2509 Plus + Fusion LoRA
+#        (dx8152/Qwen-Image-Edit-2509-Fusion). Pass the original car photo
+#        and the target studio background as two reference images to a
+#        model trained specifically for product-into-background blending
+#        with perspective and lighting correction. Drops the homemade
+#        compose / scene_only / ghost_guard / shadow_mask infrastructure
+#        on the AI path - the LoRA handles all of that natively.
+#   v8 - 2026-05-22: deterministic-first architecture. compose + shadow +
+#        new reflection stage place the car; Qwen 2511 is downgraded to a
+#        finishing-only polish pass; quality_guard catches AI-introduced
+#        duplicate cars and falls back to the deterministic composite;
+#        preserve_car gets a configurable identity-strength blend.
+#   v9 - 2026-05-28: image-processing overhaul.
+#        - new prep stage (denoise + auto white balance + highlight
+#          recovery) before segmentation
+#        - new studio short-circuit that skips segment/compose for
+#          inputs already on a clean wall
+#        - compose picks landscape, square or portrait canvas from the
+#          input's aspect ratio; backgrounds are centre-cropped to the
+#          target aspect instead of stretched
+#        - wheel-contact detector adds a two-blob path for 3/4 angles
+#          and trucks
+#        - reflection now tints toward the sampled floor colour and
+#          adds a chassis ambient-occlusion blob under the silhouette
+#        - preserve_car classifies chrome / glass / paint and lets more
+#          of Qwen's lighting through on reflective surfaces while
+#          keeping plates and badges at full identity
+#        - plate_blur gains a local heuristic detector for when the
+#          Replicate detector model is not configured
+#   v10 - 2026-05-28: ghost-car / sticker fixes.
+#        - refine_mask now floods from *every* transparent border pixel
+#          before deciding what's an interior hole, so the gap between
+#          the wheels stops getting filled when the silhouette touches
+#          the bottom corners of its bbox
+#        - contact detection runs on the pre-fill ``raw_alpha`` (passed
+#          through from refine_mask) so the two-wheel detector can see
+#          the gap even when interior fill closed it
+#        - quality_guard gains a luma-blob signal for soft / blurry
+#          duplicate cars and tightens the safe halo to 15%
+#        - preserve_car chrome / glass identity floors raised from
+#          0.55 / 0.65 to 0.78 / 0.75
+#        - harmonize prompt repeats and strengthens the ghost-car
+#          prohibition
+PIPELINE_VERSION = "10"
+
 REQUEST_COUNT = Counter("studio_requests_total", "Total HTTP requests", ["method", "path", "status"])
 REQUEST_LATENCY = Histogram("studio_request_seconds", "Request latency", ["method", "path"])
 JOBS_ENQUEUED = Counter("studio_jobs_enqueued_total", "Jobs enqueued")
@@ -250,7 +319,7 @@ def _register_routes(app: FastAPI) -> None:
         # not block retries.
         input_hash = hashlib.sha256(body).hexdigest()
         params_hash = hashlib.sha256(
-            f"{background}|{harmonize}|{preserve_car}|{relight}|{plate_blur}|{upscale}|{extra_prompt or ''}".encode()
+            f"v{PIPELINE_VERSION}|{background}|{harmonize}|{preserve_car}|{relight}|{plate_blur}|{upscale}|{extra_prompt or ''}".encode()
         ).hexdigest()
 
         existing = await repo.find_existing_by_hash(input_hash, params_hash)

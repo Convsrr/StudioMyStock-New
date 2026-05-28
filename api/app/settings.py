@@ -72,6 +72,40 @@ class Settings(BaseSettings):
     jpeg_quality: int = Field(default=92, ge=60, le=100)
     job_timeout_seconds: int = 300
 
+    # Pre-segmentation prep (denoise + auto WB + highlight recovery)
+    enable_prep: bool = True
+    prep_denoise: bool = True
+    prep_white_balance: bool = True
+    prep_highlight_recover: bool = True
+    prep_wb_strength: float = Field(default=0.6, ge=0.0, le=1.0)
+
+    # Skip segment/compose/shadow when input already looks like a studio shot
+    enable_studio_shortcircuit: bool = True
+
+    # Reflection stage (deterministic floor reflection under the car)
+    enable_reflection: bool = True
+    reflection_opacity: float = Field(default=0.18, ge=0.0, le=1.0)
+    reflection_blur: int = Field(default=10, ge=0, le=64)
+    reflection_floor_tint: float = Field(default=0.55, ge=0.0, le=1.0)
+
+    # Chassis ambient occlusion (soft darkening under the car). Lives in
+    # the reflection stage so it shares the contact-line anchor.
+    enable_chassis_ao: bool = True
+    chassis_ao_strength: float = Field(default=0.45, ge=0.0, le=1.0)
+
+    # Quality guard: detect AI-introduced duplicate cars and fall back
+    # to the deterministic composite when triggered.
+    enable_duplicate_guard: bool = True
+
+    # preserve_car: how strongly to keep the original cutout pixels vs
+    # Qwen's lit version of the car region. 0.92 = 92% original, 8% AI.
+    car_identity_strength: float = Field(default=0.92, ge=0.5, le=1.0)
+
+    # When True, preserve_car classifies chrome / glass / paint inside
+    # the cutout and lets more of Qwen's harmonized lighting through on
+    # chrome and glass while keeping plates and badges at full identity.
+    preserve_car_adaptive: bool = True
+
     # Run pipeline inline via FastAPI BackgroundTasks instead of enqueuing to Redis.
     # Useful for local dev or single-host deployments without a worker process.
     inline_processing: bool = False

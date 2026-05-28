@@ -30,8 +30,8 @@ _LIGHT_OFFSETS = {
 }
 
 
-def add_shadow(
-    canvas: Image.Image,
+def build_shadow_alpha(
+    canvas_size: tuple[int, int],
     cutout: Image.Image,
     car_box: tuple[int, int, int, int],
     contact_y_canvas: int,
@@ -39,28 +39,23 @@ def add_shadow(
     intensity: float = 0.55,
     spread: float = 0.45,
 ) -> Image.Image:
-    """Composite a perspective shadow under the car.
+    """Return a canvas-sized L mask describing where the contact shadow should
+    darken the floor (255 = full strength, 0 = no shadow). Does not composite
+    onto a canvas.
 
-    canvas: RGBA scene with car already placed at car_box
-    cutout: RGBA car cutout at car_box's size
-    car_box: (x, y, w, h) of where the car sits on canvas
-    contact_y_canvas: y on canvas where wheels meet the ground
+    The returned mask has the car silhouette zeroed so it can be applied as a
+    pure floor darkening without touching the car body.
     """
     if cutout.mode != "RGBA":
         cutout = cutout.convert("RGBA")
-    if canvas.mode != "RGBA":
-        canvas = canvas.convert("RGBA")
-
     x, y, w, h = car_box
     if cutout.size != (w, h):
         cutout = cutout.resize((w, h), Image.LANCZOS)
 
     alpha = np.asarray(cutout.split()[-1], dtype=np.uint8)
-
-    # Cap the shadow source to the bottom 50% of the silhouette: the upper body
-    # of the car shouldn't contribute as much to the ground shadow because the
-    # car is tall but the shadow lies flat.
     H_a, W_a = alpha.shape
+
+    # Cap the shadow source to the bottom of the silhouette
     car_height_above_contact = max(contact_y_canvas - y, 1)
     upper_cutoff = max(int(car_height_above_contact * 0.6), 1)
     weighted = alpha.astype(np.float32)
@@ -70,17 +65,15 @@ def add_shadow(
     shadow_alpha = np.clip(weighted * intensity, 0, 255).astype(np.uint8)
     shadow_l = Image.fromarray(shadow_alpha, mode="L")
 
-    # Vertical squash: a car that's H_car tall should cast a shadow ~H_car * spread
+    # Vertical squash + horizontal extension
     shadow_h = max(int(H_a * spread), 8)
-    shadow_w = int(W_a * 1.05)  # slight horizontal extension
+    shadow_w = int(W_a * 1.05)
     squashed = shadow_l.resize((shadow_w, shadow_h), Image.LANCZOS)
 
-    # Light-direction skew: shear the shadow horizontally
+    # Light-direction skew
     skew_per_y, x_offset_ratio = _LIGHT_OFFSETS.get(light_direction, _LIGHT_OFFSETS["top"])
     if abs(skew_per_y) > 1e-3:
-        # Affine transform: x' = x + skew * y
         skew_total = int(skew_per_y * shadow_h)
-        # We need a wider canvas for the skew result
         out_w = shadow_w + abs(skew_total)
         out_l = Image.new("L", (out_w, shadow_h), 0)
         for row in range(shadow_h):
@@ -90,46 +83,63 @@ def add_shadow(
         squashed = out_l
         shadow_w = out_w
 
-    # Heavy blur for soft shadow edge
     blur_radius = max(min(W_a, H_a) // 25, 8)
     squashed = squashed.filter(ImageFilter.GaussianBlur(radius=blur_radius))
 
-    # Vertical falloff: shadow gets lighter further from the contact line
     arr = np.asarray(squashed, dtype=np.float32)
     falloff = np.linspace(1.0, 0.25, num=arr.shape[0], dtype=np.float32)[:, None]
     arr = arr * falloff
     squashed = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), mode="L")
 
-    # Build a black RGBA layer with the shadow as alpha
-    shadow_rgba = Image.new("RGBA", squashed.size, (0, 0, 0, 0))
-    shadow_rgba.putalpha(squashed)
-
-    # Position: contact line on canvas should align with the top of the shadow.
-    # Shadow extends downward from there. Apply small x offset for off-center light.
     shadow_x = x - (shadow_w - w) // 2 + int(w * x_offset_ratio * 0.05)
-    shadow_y = contact_y_canvas - shadow_rgba.height // 6
+    shadow_y = contact_y_canvas - squashed.height // 6
 
-    out = canvas.copy()
-    # Paint shadow onto a transparent layer the size of the canvas, then
-    # composite it over the canvas with the car's alpha subtracted. This way
-    # the shadow appears only on the floor/wall regions, not on the car body.
-    out_arr = np.asarray(out).copy()
-    shadow_canvas = Image.new("RGBA", out.size, (0, 0, 0, 0))
-    shadow_canvas.alpha_composite(shadow_rgba, (shadow_x, shadow_y))
-    s_arr = np.array(shadow_canvas, dtype=np.uint8)
+    canvas_w, canvas_h = canvas_size
+    full = Image.new("L", (canvas_w, canvas_h), 0)
+    full.paste(squashed, (shadow_x, shadow_y))
 
-    # Subtract car alpha from shadow alpha so the shadow doesn't darken the car
-    car_alpha_full = np.zeros(out.size[::-1], dtype=np.uint8)
+    # Zero out anywhere the car covers so the shadow doesn't darken the car.
+    car_alpha_full = np.zeros((canvas_h, canvas_w), dtype=np.uint8)
     car_alpha_local = np.asarray(cutout.split()[-1], dtype=np.uint8)
-    cw, ch = w, h
     cx0, cy0 = max(x, 0), max(y, 0)
-    cx1, cy1 = min(x + cw, out.size[0]), min(y + ch, out.size[1])
+    cx1, cy1 = min(x + w, canvas_w), min(y + h, canvas_h)
     if cx1 > cx0 and cy1 > cy0:
         car_alpha_full[cy0:cy1, cx0:cx1] = car_alpha_local[cy0 - y:cy1 - y, cx0 - x:cx1 - x]
-    s_arr[..., 3] = np.where(car_alpha_full > 16, 0, s_arr[..., 3])
-    shadow_canvas = Image.fromarray(s_arr, mode="RGBA")
 
-    # Now composite the shadow OVER the canvas. Because we masked out the car,
-    # shadow only appears on the floor / wall regions.
-    out.alpha_composite(shadow_canvas)
+    full_arr = np.asarray(full, dtype=np.uint8).copy()
+    full_arr = np.where(car_alpha_full > 16, 0, full_arr)
+    return Image.fromarray(full_arr, mode="L")
+
+
+def add_shadow(
+    canvas: Image.Image,
+    cutout: Image.Image,
+    car_box: tuple[int, int, int, int],
+    contact_y_canvas: int,
+    light_direction: str = "top",
+    intensity: float = 0.55,
+    spread: float = 0.45,
+) -> Image.Image:
+    """Composite a perspective shadow under the car onto an existing canvas.
+
+    Used in the classical (non-Qwen) path. For the Qwen path we use
+    ``build_shadow_alpha`` and apply the shadow multiplicatively in
+    preserve_car so it lands on the harmonized floor.
+    """
+    if canvas.mode != "RGBA":
+        canvas = canvas.convert("RGBA")
+
+    shadow_l = build_shadow_alpha(
+        canvas.size,
+        cutout,
+        car_box,
+        contact_y_canvas,
+        light_direction=light_direction,
+        intensity=intensity,
+        spread=spread,
+    )
+    shadow_rgba = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    shadow_rgba.putalpha(shadow_l)
+    out = canvas.copy()
+    out.alpha_composite(shadow_rgba)
     return out

@@ -1,16 +1,26 @@
-"""Harmonization stage powered by Qwen Image Edit 2511 on Replicate.
+"""Studio-finishing AI pass.
 
-This is the stage that turns a "pasted" composite into a believable studio
-photograph. We give the model:
+The deterministic pipeline (segment + compose + shadow + reflection) has
+already produced a correctly composited image with the car in the right
+place. This stage's only job is to lightly polish the result so it looks
+like a real dealership studio photograph: integrated lighting, subtle
+ambient reflections on paint/glass/chrome, refined contact shadow, faint
+floor reflection.
 
-  1. The rough composite (car cutout placed on the chosen studio cyc).
-  2. A scene-specific prompt describing the target lighting and surfaces.
-  3. Strict instructions to preserve the car identity (paint, badges, plate, wheels).
+Hard rules (enforced via prompt + downstream quality_guard):
+    - Do not move, resize, rotate, duplicate, redraw, replace or extend
+      the car.
+    - Keep exactly one car. No mirror copies, ghost cars or extra wheels.
+    - Keep the studio background layout unchanged.
+    - Keep number plate, badges, wheels, lights, mirrors and trim
+      unchanged.
 
-We send the input as a data URL to avoid uploading to a public URL first.
-The model returns one or more URLs to the edited image.
+The AI only improves lighting integration and reflections. The original
+car pixels are pasted back via preserve_car after this stage to guarantee
+identity. The orchestrator additionally compares before/after and falls
+back to the deterministic composite if a duplicate vehicle is suspected.
 
-Docs: https://replicate.com/qwen/qwen-image-edit-2511
+Endpoint: ``qwen/qwen-image-edit-2511`` on Replicate.
 """
 from __future__ import annotations
 
@@ -40,20 +50,10 @@ _MODEL = "qwen/qwen-image-edit-2511"
 _REPLICATE_TIMEOUT = httpx.Timeout(180.0, connect=10.0)
 
 
-_PRESERVE_INSTRUCTIONS = (
-    "There is exactly one car in this image. There must be exactly one car in the output, "
-    "in the same position and orientation as the input. Do not duplicate the car, do not add "
-    "extra cars, do not extend the car body, do not generate any additional vehicles or "
-    "reflections of the car. "
-    "Focus your edits on: the studio walls, floor surface, ambient lighting on the car body, "
-    "and the soft contact shadow directly underneath the car's wheels. "
-    "Do not modify the car body shape, paint colour, badges, license plate digits, wheels, or trim."
-)
-
-
-def _aspect_ratio_for(size: tuple[int, int]) -> str:
-    """Return Qwen's supported aspect_ratio. We use match_input_image so the
-    output matches whatever canvas we sent (e.g. 3:2 isn't in the enum)."""
+def _aspect_ratio_for(_size: tuple[int, int]) -> str:
+    """We always want Qwen to keep the input canvas; ``match_input_image``
+    bypasses the model's aspect ratio enum.
+    """
     return "match_input_image"
 
 
@@ -65,27 +65,49 @@ def _to_data_url(img: Image.Image) -> str:
 
 
 def _build_prompt(background_id: str, extra: Optional[str] = None) -> str:
+    """Studio-finishing prompt.
+
+    The phrasing tells Qwen the composition is already correct and asks for
+    light polishing only. We include identity-preservation reminders for
+    plate/badges/trim, but stay positive about what we *want* (better
+    reflections, integrated light) so Qwen can still improve the image.
+
+    A few hard "do not paint X anywhere outside the existing car
+    silhouette" sentences, repeated near the end of the prompt, are the
+    main defence against ghost cars. Repetition matters: image-edit
+    models attend more strongly to constraints stated last and stated
+    multiple ways.
+    """
     preset = backgrounds.get_preset(background_id)
     parts = [
-        f"This image shows a car in this scene: {preset.prompt}.",
-        # Body-relight mode: car + shadow + scene are already composited correctly.
-        # We want Qwen to harmonize the *lighting* on the car body only.
-        "The car is correctly placed and the ground shadow is correctly drawn. "
-        "Do NOT move the car. Do NOT change the car's position, scale, orientation, "
-        "or proportions. Do NOT add any extra cars, people, or objects. "
-        "Do NOT alter the floor, walls, ground shadow, or background composition. "
-        "Only adjust the lighting and ambient reflections on the car body so it "
-        "matches the studio lighting. Keep the car's paint colour, badges, license "
-        "plate digits, wheels, and trim exactly as they appear in the input.",
-        # Hard anti-duplication clauses. Qwen sometimes hallucinates a "reflection"
-        # or a second car in the floor/wall - explicitly forbid this.
-        "Do not create reflections that look like a second car. "
-        "Do not create duplicate silhouettes, ghost cars, mirror copies, "
-        "or extra wheels anywhere in the frame. "
-        "Do not change the floor or background layout. "
-        "Only adjust lighting and ambient colour on the existing car and scene.",
-        _PRESERVE_INSTRUCTIONS,
-        "Output: the same image with subtly improved lighting on the car only.",
+        # Establish what the input is.
+        f"This image is a real dealership studio photograph of a car. "
+        f"Studio scene: {preset.prompt}.",
+        # What the model is allowed to do.
+        "Treat the car as already correctly placed and correctly sized. Improve only: "
+        "lighting integration between the car and the studio, soft ambient reflections "
+        "on the paint, glass, chrome and trim, the realism of the contact shadow under "
+        "the wheels, and the faint floor reflection beneath the car. Make the result "
+        "look like a clean, professional studio shot.",
+        # What the model must not do (general identity preservation).
+        "Do not move, resize, rotate, flip or reposition the car. Do not redraw, "
+        "replace, extend or shorten the car body. Keep exactly one car in the output. "
+        "Do not change the studio background composition, walls or floor layout. "
+        "Do not modify the license plate digits, badges, headlights, taillights, "
+        "wheels, mirrors, paint colour or trim - keep them pixel-identical to the input.",
+        # Hard ghost-car prohibition. Repeated three ways on purpose.
+        "There is exactly one car in this image and exactly one car must remain in the "
+        "output. Do not paint, sketch, hallucinate, complete or imply any second car, "
+        "second wheel, second bumper, second mirror, second plate, second windshield, "
+        "second light cluster or second silhouette anywhere in the frame. "
+        "Outside the existing car silhouette the floor must remain empty floor and the "
+        "walls must remain empty walls; do not place any vehicle parts, vehicle textures "
+        "or vehicle reflections outside the silhouette other than the contact shadow "
+        "and floor reflection directly under the car.",
+        # Output target.
+        "Output: the same scene, the same one car, same composition, with subtly "
+        "improved studio lighting, ambient reflections and floor integration. "
+        "One car only.",
     ]
     if extra:
         parts.append(extra)
@@ -97,21 +119,27 @@ async def harmonize(
     background_id: str,
     extra_prompt: Optional[str] = None,
 ) -> Image.Image:
-    """Send a rough composite to Qwen Image Edit and return the harmonized result.
+    """Send the deterministic composite to Qwen for finishing-only polish.
 
-    Falls back to the unmodified composite on any failure so the pipeline never
-    hard-fails because of a model hiccup.
+    Returns an RGB image at the same size as ``composite``. Falls back to the
+    unmodified composite on any failure so the pipeline never hard-fails on
+    a model hiccup.
     """
     settings = get_settings()
     if not settings.replicate_enabled:
         log.warning("harmonize.skipped.no_replicate")
-        return composite
+        return composite.convert("RGB")
 
     prompt = _build_prompt(background_id, extra_prompt)
     aspect_ratio = _aspect_ratio_for(composite.size)
     image_data_url = _to_data_url(composite)
 
-    log.info("harmonize.start", model=_MODEL, aspect_ratio=aspect_ratio, prompt_chars=len(prompt))
+    log.info(
+        "harmonize.start",
+        model=_MODEL,
+        aspect_ratio=aspect_ratio,
+        prompt_chars=len(prompt),
+    )
 
     try:
         result_url = await _run_replicate(
@@ -123,20 +151,24 @@ async def harmonize(
         result_img = await _download(result_url)
     except Exception as exc:  # noqa: BLE001
         log.warning("harmonize.failed", error=str(exc))
-        return composite
+        return composite.convert("RGB")
 
-    # The model returns a webp; convert to RGB and resize to match canvas.
     if result_img.size != composite.size:
         result_img = result_img.resize(composite.size, Image.LANCZOS)
     return result_img.convert("RGB")
 
 
-async def _run_replicate(token: str, *, prompt: str, image_data_url: str, aspect_ratio: str) -> str:
-    """Create a prediction, poll until it finishes, return the output URL."""
+async def _run_replicate(
+    token: str,
+    *,
+    prompt: str,
+    image_data_url: str,
+    aspect_ratio: str,
+) -> str:
     headers = {
         "Authorization": f"Token {token}",
         "Content-Type": "application/json",
-        "Prefer": "wait=60",  # max allowed; we poll for the rest
+        "Prefer": "wait=60",
     }
     payload = {
         "input": {
@@ -145,7 +177,8 @@ async def _run_replicate(token: str, *, prompt: str, image_data_url: str, aspect
             "aspect_ratio": aspect_ratio,
             "output_format": "jpg",
             "output_quality": 95,
-            "go_fast": False,  # Higher quality is worth the extra latency for cars
+            # Higher quality is worth the extra latency for car listings.
+            "go_fast": False,
         }
     }
 
@@ -163,19 +196,19 @@ async def _run_replicate(token: str, *, prompt: str, image_data_url: str, aspect
                     json=payload,
                 )
                 if resp.status_code == 422:
-                    # Schema validation error - log the body so we can see what was wrong
                     log.error("harmonize.422", body=resp.text[:1000])
                     raise ExternalServiceError(f"replicate 422: {resp.text[:500]}")
                 if resp.status_code >= 500:
-                    raise ExternalServiceError(f"replicate {resp.status_code}: {resp.text[:200]}")
+                    raise ExternalServiceError(
+                        f"replicate {resp.status_code}: {resp.text[:200]}"
+                    )
                 resp.raise_for_status()
 
         prediction = resp.json()
         status = prediction.get("status")
 
-        # If the wait header didn't get us all the way to terminal, poll.
         poll_url = prediction.get("urls", {}).get("get")
-        deadline_polls = 60  # ~120s at 2s each
+        deadline_polls = 60
         while status not in {"succeeded", "failed", "canceled"} and deadline_polls > 0:
             await asyncio.sleep(2.0)
             deadline_polls -= 1

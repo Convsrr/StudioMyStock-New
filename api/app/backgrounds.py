@@ -111,7 +111,15 @@ def get_preset(preset_id: str) -> BackgroundPreset:
 
 
 def get_background(preset_id: str, size: tuple[int, int]) -> Image.Image:
-    """Return the background image at the requested size, with on-disk caching."""
+    """Return the background image at the requested size, with on-disk caching.
+
+    The shipped preset assets are 1920x1280 landscape. When the requested
+    size has a different aspect ratio (square or portrait), we centre-crop
+    the source asset to the target aspect and then resize, instead of
+    naively stretching. The studio scenes are roughly translation-symmetric
+    horizontally so a centre slice still reads as a believable studio.
+    The floor-line ratio is preserved by the proportional resize.
+    """
     if preset_id not in _BY_ID:
         raise KeyError(f"Unknown background: {preset_id}")
 
@@ -128,6 +136,37 @@ def get_background(preset_id: str, size: tuple[int, int]) -> Image.Image:
         )
     img = Image.open(src).convert("RGB")
     if img.size != size:
-        img = img.resize(size, Image.LANCZOS)
+        img = _reframe_to_aspect(img, size)
     img.save(cache_path, "JPEG", quality=92)
     return img
+
+
+def _reframe_to_aspect(img: Image.Image, size: tuple[int, int]) -> Image.Image:
+    """Centre-crop ``img`` to the aspect of ``size``, then resize to ``size``.
+
+    If the source already has the target aspect (within 1%), this is a
+    plain resize.
+    """
+    target_w, target_h = size
+    src_w, src_h = img.size
+    target_aspect = target_w / target_h
+    src_aspect = src_w / src_h
+
+    if abs(target_aspect - src_aspect) < 0.01:
+        return img.resize(size, Image.LANCZOS)
+
+    if target_aspect > src_aspect:
+        # Target is wider than source: crop the source vertically.
+        crop_h = int(round(src_w / target_aspect))
+        crop_h = min(crop_h, src_h)
+        offset = (src_h - crop_h) // 2
+        cropped = img.crop((0, offset, src_w, offset + crop_h))
+    else:
+        # Target is narrower than source (e.g. portrait canvas from a
+        # landscape asset): crop the source horizontally.
+        crop_w = int(round(src_h * target_aspect))
+        crop_w = min(crop_w, src_w)
+        offset = (src_w - crop_w) // 2
+        cropped = img.crop((offset, 0, offset + crop_w, src_h))
+
+    return cropped.resize(size, Image.LANCZOS)

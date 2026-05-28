@@ -13,12 +13,13 @@ log = get_logger(__name__)
 
 
 _PROMPTS: dict[str, str] = {
-    "studio-gray": "professional automotive studio lighting, soft key light, neutral fill, clean cyc",
-    "studio-dark": "moody automotive studio, low key lighting, rim light on bodywork, dark cyc",
-    "showroom": "warm dealership showroom lighting, overhead softboxes, polished floor",
-    "sunset-road": "golden hour sunlight, warm rim light, long shadows, asphalt foreground",
-    "forest": "soft overcast daylight, cool ambient, subtle dappled highlights",
+    "studio-white": "professional automotive studio lighting, clean white cyc, soft overhead key, even neutral fill",
+    "studio-grey": "professional automotive studio lighting, light grey cyc, soft overhead key, neutral fill",
+    "studio-charcoal": "moody automotive studio lighting, dark charcoal cyc, low-key overhead, rim light on bodywork",
+    "studio-warm": "warm automotive showroom lighting, cream cyc, warm overhead softboxes, gentle key",
+    "studio-blueprint": "modern automotive studio lighting, cool blue-grey cyc, clean overhead key, subtle cool tint",
 }
+_DEFAULT_PROMPT = "professional automotive studio lighting, soft key light, neutral fill"
 
 
 async def relight(image: Image.Image, background_id: str) -> Image.Image:
@@ -31,7 +32,7 @@ async def relight(image: Image.Image, background_id: str) -> Image.Image:
     image.convert("RGB").save(buf, format="PNG")
     buf.seek(0)
 
-    prompt = _PROMPTS.get(background_id, "professional automotive lighting")
+    prompt = _PROMPTS.get(background_id, _DEFAULT_PROMPT)
     try:
         output = await replicate_client.run_model(
             settings.replicate_relight,
