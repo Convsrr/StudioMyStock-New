@@ -66,6 +66,7 @@ class S3Storage(Storage):
 
         self.bucket = settings.s3_bucket
         self.public_base = (settings.s3_public_base_url or "").rstrip("/")
+        self.presigned_ttl = settings.s3_presigned_url_ttl_seconds
         self._client = boto3.client(
             "s3",
             region_name=settings.s3_region or None,
@@ -105,9 +106,11 @@ class S3Storage(Storage):
     def public_url(self, key: str) -> str:
         if self.public_base:
             return f"{self.public_base}/{key}"
-        # Fallback: presigned-style virtual host URL
-        endpoint = self._client.meta.endpoint_url.rstrip("/")
-        return f"{endpoint}/{self.bucket}/{key}"
+        return self._client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": self.bucket, "Key": key},
+            ExpiresIn=self.presigned_ttl,
+        )
 
 
 _storage: Optional[Storage] = None
@@ -123,6 +126,11 @@ def get_storage() -> Storage:
             raise RuntimeError("STORAGE_BACKEND=s3 requires S3_BUCKET")
         _storage = S3Storage(settings)
     else:
+        if settings.app_env == "production" and not settings.allow_public_local_storage:
+            raise RuntimeError(
+                "Local static storage is public and disabled in production. "
+                "Use STORAGE_BACKEND=s3 or set ALLOW_PUBLIC_LOCAL_STORAGE=true."
+            )
         _storage = LocalStorage(settings.storage_dir, settings.public_base_url)
     return _storage
 

@@ -22,13 +22,24 @@ async def segment_car(source: Image.Image) -> Image.Image:
     if provider == "picsart":
         try:
             return await picsart_client.remove_background(source)
-        except ExternalServiceError:
+        except ExternalServiceError as exc:
+            if settings.segmentation_provider == "auto" and settings.replicate_enabled:
+                log.warning("segment.picsart_failed.try_replicate", error=str(exc))
+                return await _replicate_segment(source, settings)
             raise
         except Exception as exc:  # noqa: BLE001
+            if settings.segmentation_provider == "auto" and settings.replicate_enabled:
+                log.warning("segment.picsart_crashed.try_replicate", error=str(exc))
+                return await _replicate_segment(source, settings)
             raise PipelineError(f"picsart segmentation failed: {exc}") from exc
 
     if provider == "replicate":
         return await _replicate_segment(source, settings)
+
+    if settings.app_env == "production":
+        raise PipelineError(
+            "No segmentation provider is configured. Set PICSART_API_KEY or REPLICATE_API_TOKEN."
+        )
 
     # 'none': local fallback for dev/CI. The output will look wrong but the
     # pipeline still completes so end-to-end tests can run without network.

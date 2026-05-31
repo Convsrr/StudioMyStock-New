@@ -153,6 +153,7 @@ def detect_possible_duplicate_vehicle(
     luma_blob_min_area_ratio: float = 0.005,
     luma_blob_max_area_ratio: float = 0.40,
     halo_ratio: float = 0.15,
+    reflection_band_height_ratio: float = 0.22,
 ) -> bool:
     """Return True if the AI pass appears to have introduced a duplicate
     vehicle outside the original car region.
@@ -166,6 +167,12 @@ def detect_possible_duplicate_vehicle(
       ``luma_blob_max_area_ratio``: connected-component check on
       "regions the AI noticeably darkened that are roughly car-sized".
       Catches soft / blurry duplicates and bumper-extension smears.
+
+    Reflection-band exemption: blobs that sit predominantly inside the
+    floor reflection band (``reflection_band_height_ratio`` of the
+    car_box height immediately below the car) are skipped because that
+    is exactly where the deterministic reflection stage paints its
+    output and where Qwen is allowed to lightly polish it.
     """
     if before_ai.size == (0, 0) or after_ai.size == (0, 0):
         return False
@@ -184,6 +191,12 @@ def detect_possible_duplicate_vehicle(
     if unsafe_area < 64:
         return False
 
+    # Reflection band in downscaled coords. Anything whose centroid sits
+    # inside this band gets exempted from the dark-blob signal.
+    reflection_band = _reflection_band(
+        before_gray.shape, car_box, before_ai.size, reflection_band_height_ratio,
+    )
+
     flagged_edge, edge_metrics = _edge_signal(
         before_gray, after_gray, unsafe, edge_increase_threshold,
         blob_area_ratio_threshold,
@@ -191,6 +204,7 @@ def detect_possible_duplicate_vehicle(
     flagged_luma, luma_metrics = _luma_signal(
         before_gray, after_gray, unsafe, luma_drop_threshold,
         luma_blob_min_area_ratio, luma_blob_max_area_ratio,
+        reflection_band=reflection_band,
     )
 
     flagged = flagged_edge or flagged_luma
@@ -206,6 +220,35 @@ def detect_possible_duplicate_vehicle(
     )
 
     return flagged
+
+
+def _reflection_band(
+    shape: tuple[int, int],
+    car_box: tuple[int, int, int, int],
+    src_size: tuple[int, int],
+    height_ratio: float,
+) -> tuple[int, int, int, int]:
+    """Return the (x0, y0, x1, y1) of the floor reflection band in
+    downscaled coords.
+
+    The band sits immediately below the car_box, spans the car's width
+    plus a small margin, and is ``height_ratio`` of the car's height
+    tall. Any duplicate-car-shaped blob whose centroid falls inside
+    this band is exempt from the guard because that's the deterministic
+    reflection's territory.
+    """
+    out_h, out_w = shape
+    src_w, src_h = src_size
+    x, y, w, h = car_box
+
+    sx = out_w / max(src_w, 1)
+    sy = out_h / max(src_h, 1)
+    bx0 = max(int(round(x * sx)) - int(round(w * sx * 0.08)), 0)
+    bx1 = min(int(round((x + w) * sx)) + int(round(w * sx * 0.08)), out_w)
+    by_top = int(round((y + h) * sy))
+    band_h = max(int(round(h * sy * height_ratio)), 4)
+    by_bottom = min(by_top + band_h, out_h)
+    return bx0, by_top, bx1, by_bottom
 
 
 def _edge_signal(
@@ -244,6 +287,8 @@ def _luma_signal(
     luma_drop_threshold: float,
     min_area_ratio: float,
     max_area_ratio: float,
+    *,
+    reflection_band: tuple[int, int, int, int] | None = None,
 ) -> tuple[bool, dict]:
     """Connected-component check on regions the AI noticeably darkened.
 
@@ -259,7 +304,10 @@ def _luma_signal(
         - has an aspect ratio between 0.7 and 5.0 (vehicles, bumpers,
           extended silhouettes),
         - has reasonable fill (area / bbox >= 0.30) so we don't flag a
-          long thin shadow line.
+          long thin shadow line,
+        - has a centroid that falls *outside* the deterministic floor
+          reflection band (``reflection_band``) so we don't mistake the
+          reflection for a duplicate.
     """
     delta = before_gray.astype(np.int16) - after_gray.astype(np.int16)
     darkened = (delta > luma_drop_threshold) & unsafe
@@ -281,6 +329,12 @@ def _luma_signal(
         area_ratio = area / max(unsafe_area, 1)
         aspect = w / max(h, 1)
         fill = area / float(w * h)
+        cx = (x0 + x1) // 2
+        cy = (y0 + y1) // 2
+        in_reflection = False
+        if reflection_band is not None:
+            rx0, ry0, rx1, ry1 = reflection_band
+            in_reflection = rx0 <= cx < rx1 and ry0 <= cy < ry1
         metrics = {
             "area": int(area),
             "area_ratio": round(area_ratio, 4),
@@ -288,9 +342,14 @@ def _luma_signal(
             "h": h,
             "aspect": round(aspect, 2),
             "fill": round(fill, 2),
+            "in_reflection": in_reflection,
         }
         if largest_metrics is None or area > largest_metrics["area"]:
             largest_metrics = metrics
+        if in_reflection:
+            # Reflection band is owned by the deterministic stage; AI
+            # is permitted to lightly polish it.
+            continue
         if (
             area_ratio >= min_area_ratio
             and area_ratio <= max_area_ratio

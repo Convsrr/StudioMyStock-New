@@ -31,10 +31,11 @@ PRESETS: list[BackgroundPreset] = [
         id="studio-white",
         name="Studio White",
         description="Clean white cyc wall, light concrete floor",
+        # Style observation only. The asset already shows the scene; we
+        # ask Qwen to keep its character, not to redraw it.
         prompt=(
-            "professional automotive photography studio, seamless white cyc wall "
-            "with subtle warm overhead spotlights, light grey concrete floor, "
-            "soft even lighting, no other objects, magazine-quality, photorealistic"
+            "clean bright automotive studio, light neutral background, "
+            "even soft daylight"
         ),
         floor_y_ratio=0.62,
         light_direction="top",
@@ -44,9 +45,8 @@ PRESETS: list[BackgroundPreset] = [
         name="Studio Grey",
         description="Light cyc, mid-grey tile floor",
         prompt=(
-            "professional automotive photography studio, seamless light grey cyc wall, "
-            "polished grey square tile floor, soft overhead studio lighting, "
-            "no other objects, dealership style, photorealistic"
+            "neutral grey automotive studio, soft overhead daylight, "
+            "calm atmosphere"
         ),
         floor_y_ratio=0.60,
         light_direction="top",
@@ -56,10 +56,8 @@ PRESETS: list[BackgroundPreset] = [
         name="Studio Charcoal",
         description="Moody dark cyc, polished black floor",
         prompt=(
-            "premium automotive photography studio, dark charcoal seamless cyc wall, "
-            "glossy polished black floor reflecting subtle highlights, "
-            "moody low-key lighting with rim lights, no other objects, "
-            "luxury car magazine cover, photorealistic"
+            "moody dark automotive studio, low-key calm lighting, "
+            "subtle warm rim along the top edge"
         ),
         floor_y_ratio=0.62,
         light_direction="top-left",
@@ -69,9 +67,8 @@ PRESETS: list[BackgroundPreset] = [
         name="Studio Warm",
         description="Warm cream cyc, sandstone floor",
         prompt=(
-            "warm-toned automotive showroom, cream-coloured seamless cyc wall, "
-            "warm sandstone concrete floor, soft warm overhead lighting, "
-            "no other objects, premium dealership feel, photorealistic"
+            "warm-toned automotive studio, single soft warm overhead glow, "
+            "calm atmosphere"
         ),
         floor_y_ratio=0.62,
         light_direction="top-right",
@@ -81,9 +78,8 @@ PRESETS: list[BackgroundPreset] = [
         name="Studio Blueprint",
         description="Cool blue-tinted cyc, light tile floor",
         prompt=(
-            "modern automotive photography studio, cool blue-grey seamless cyc wall, "
-            "light grey tile floor, clean overhead lighting with subtle cool tint, "
-            "no other objects, modern tech feel, photorealistic"
+            "cool blue-tinted automotive studio, even neutral overhead light, "
+            "calm atmosphere"
         ),
         floor_y_ratio=0.62,
         light_direction="top",
@@ -123,17 +119,19 @@ def get_background(preset_id: str, size: tuple[int, int]) -> Image.Image:
     if preset_id not in _BY_ID:
         raise KeyError(f"Unknown background: {preset_id}")
 
-    cache_dir = get_settings().cache_dir / "backgrounds"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_path = cache_dir / f"{preset_id}_{size[0]}x{size[1]}.jpg"
-    if cache_path.exists():
-        return Image.open(cache_path).convert("RGB")
-
     src = ASSETS_DIR / f"{preset_id}.jpg"
     if not src.exists():
         raise FileNotFoundError(
             f"Background asset missing: {src}. Run scripts/render_backgrounds.py."
         )
+
+    cache_dir = get_settings().cache_dir / "backgrounds"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    asset_version = src.stat().st_mtime_ns
+    cache_path = cache_dir / f"{preset_id}_{size[0]}x{size[1]}_{asset_version}.jpg"
+    if cache_path.exists():
+        return Image.open(cache_path).convert("RGB")
+
     img = Image.open(src).convert("RGB")
     if img.size != size:
         img = _reframe_to_aspect(img, size)

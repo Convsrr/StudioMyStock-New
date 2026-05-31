@@ -45,18 +45,32 @@ from . import (
     color_match,
     compose,
     decode,
-    harmonize as harmonize_stage,
     plate_blur,
-    prep as prep_stage,
-    preserve_car as preserve_car_stage,
     quality_guard,
     refine_mask,
-    reflection as reflection_stage,
-    relight as relight_stage,
     scene_detect,
     segment,
     shadow,
+)
+from . import (
+    harmonize as harmonize_stage,
+)
+from . import (
+    prep as prep_stage,
+)
+from . import (
+    preserve_car as preserve_car_stage,
+)
+from . import (
+    reflection as reflection_stage,
+)
+from . import (
+    relight as relight_stage,
+)
+from . import (
     upscale as upscale_stage,
+)
+from . import (
     watermark as watermark_stage,
 )
 
@@ -126,20 +140,26 @@ async def run_pipeline(input_bytes: bytes, params: PipelineParams) -> PipelineRe
         #     unset on this path so plate_blur falls back to whole-image
         #     search.
         already_studio = False
-        if settings.enable_studio_shortcircuit and params.harmonize:
+        if (
+            settings.enable_studio_shortcircuit
+            and settings.allow_studio_shortcircuit_passthrough
+            and params.harmonize
+        ):
             with _stage("scene_detect"):
                 already_studio = scene_detect.looks_like_studio(source)
 
         if already_studio:
             log.info("pipeline.studio_shortcircuit")
             with _stage("harmonize"):
-                composite_rgb = (
-                    await harmonize_stage.harmonize(
-                        source.convert("RGBA"),
-                        params.background_id,
-                        extra_prompt=params.extra_prompt,
-                    )
-                ).convert("RGB")
+                h_result = await harmonize_stage.harmonize(
+                    source.convert("RGBA"),
+                    params.background_id,
+                    extra_prompt=params.extra_prompt,
+                )
+                composite_rgb = h_result.image.convert("RGB")
+                timings["harmonize_used_ai"] = 1 if h_result.used_ai else 0
+                if h_result.warning:
+                    timings[f"warning_{h_result.warning}"] = 1
             car_box: Optional[tuple[int, int, int, int]] = None
         else:
             # 3. Segment the car out of its original background.
@@ -189,11 +209,15 @@ async def run_pipeline(input_bytes: bytes, params: PipelineParams) -> PipelineRe
             if params.harmonize:
                 # 8. AI finishing pass. Studio polish only.
                 with _stage("harmonize"):
-                    ai_rgb = await harmonize_stage.harmonize(
+                    h_result = await harmonize_stage.harmonize(
                         composite,
                         params.background_id,
                         extra_prompt=params.extra_prompt,
                     )
+                    ai_rgb = h_result.image
+                    timings["harmonize_used_ai"] = 1 if h_result.used_ai else 0
+                    if h_result.warning:
+                        timings[f"warning_{h_result.warning}"] = 1
 
                 # 9. Duplicate-vehicle safety check.
                 if settings.enable_duplicate_guard:
@@ -207,6 +231,7 @@ async def run_pipeline(input_bytes: bytes, params: PipelineParams) -> PipelineRe
                             car_box=car_box,
                         )
                         ai_rgb = deterministic_rgb
+                        timings["warning_duplicate_guard_fallback"] = 1
 
                 # 10. preserve_car: re-paste the original cutout with high
                 #     identity strength so badges/plates/trim are dealer-accurate.

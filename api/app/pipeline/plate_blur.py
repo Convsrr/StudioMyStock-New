@@ -22,6 +22,7 @@ import io
 import numpy as np
 from PIL import Image, ImageFilter
 
+from ..errors import PipelineError
 from ..logging_setup import get_logger
 from ..settings import get_settings
 from . import replicate_client
@@ -56,11 +57,18 @@ async def blur_plates(
     """
     settings = get_settings()
 
+    if settings.app_env == "production" and not settings.replicate_plate_detector:
+        raise PipelineError(
+            "Plate blur was requested in production, but REPLICATE_PLATE_DETECTOR is not configured."
+        )
+
     # Tier 1: cloud detector (preferred)
     if settings.replicate_enabled and settings.replicate_plate_detector:
         try:
             return await _blur_via_replicate(image, settings.replicate_plate_detector)
         except Exception as exc:  # noqa: BLE001
+            if settings.app_env == "production":
+                raise PipelineError(f"Production plate detector failed: {exc}") from exc
             log.warning("plate_blur.replicate.failed_falling_back", error=str(exc))
 
     # Tier 2: local heuristic

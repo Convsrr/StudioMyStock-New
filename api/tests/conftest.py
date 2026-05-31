@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import io
 import os
-import tempfile
-from pathlib import Path
 
 import pytest
 from PIL import Image
@@ -15,6 +13,7 @@ def _env(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("storage")
     os.environ["USE_REPLICATE"] = "false"
     os.environ["REPLICATE_API_TOKEN"] = ""
+    os.environ["PICSART_API_KEY"] = ""
     os.environ["STORAGE_BACKEND"] = "local"
     os.environ["STORAGE_DIR"] = str(tmp)
     os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{tmp}/test.db"

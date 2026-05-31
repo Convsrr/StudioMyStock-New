@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 import structlog
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -105,7 +105,31 @@ log = get_logger(__name__)
 #          0.55 / 0.65 to 0.78 / 0.75
 #        - harmonize prompt repeats and strengthens the ghost-car
 #          prohibition
-PIPELINE_VERSION = "10"
+#   v11 - 2026-05-28: preset asset / prompt alignment fixes.
+#        - re-rendered studio-charcoal, studio-warm and studio-blueprint
+#          assets so they actually match their style cues (charcoal:
+#          horizon-band specular polished floor; warm: single warm
+#          overhead glow + sandstone concrete with perspective; blueprint:
+#          properly cool blue cyc + real tile floor with grout)
+#        - per-preset prompts switched from "target scene description"
+#          to short "style cues" so Qwen no longer feels obliged to
+#          repaint walls and floor to satisfy a rich description
+#        - harmonize prompt now pins existing wall colour, floor colour,
+#          tile pattern, horizon line and light placement; explicit
+#          prohibitions on adding tile grids / spotlights / windows /
+#          architectural features
+#        - quality_guard gets a reflection-band exemption: a horizontal
+#          dark blob whose centroid sits in the deterministic floor
+#          reflection band (~22% of car height immediately below the
+#          car) is no longer treated as a duplicate-vehicle candidate
+#   v12 - 2026-05-31: production-readiness fixes.
+#        - watermark bytes are included in idempotency hashing
+#        - provider degradation is exposed in stage_timings
+#        - studio passthrough is opt-in so chosen backgrounds are honoured
+#        - background cache keys include asset mtimes
+#        - optional prompts are constrained before final safety rules
+#        - production plate blur requires a configured detector
+PIPELINE_VERSION = "12"
 
 REQUEST_COUNT = Counter("studio_requests_total", "Total HTTP requests", ["method", "path", "status"])
 REQUEST_LATENCY = Histogram("studio_request_seconds", "Request latency", ["method", "path"])
@@ -311,6 +335,20 @@ def _register_routes(app: FastAPI) -> None:
         if not body:
             raise ValidationError("Empty file")
 
+        if extra_prompt is not None:
+            extra_prompt = " ".join(extra_prompt.split())[:500] or None
+
+        watermark_bytes: Optional[bytes] = None
+        watermark_content_type = ""
+        watermark_hash = "none"
+        if watermark is not None:
+            watermark_bytes = await watermark.read()
+            if watermark_bytes:
+                watermark_content_type = watermark.content_type or "image/png"
+                watermark_hash = hashlib.sha256(
+                    watermark_content_type.encode() + b"\0" + watermark_bytes
+                ).hexdigest()
+
         storage = get_storage()
         repo = JobRepository(session)
 
@@ -319,7 +357,11 @@ def _register_routes(app: FastAPI) -> None:
         # not block retries.
         input_hash = hashlib.sha256(body).hexdigest()
         params_hash = hashlib.sha256(
-            f"v{PIPELINE_VERSION}|{background}|{harmonize}|{preserve_car}|{relight}|{plate_blur}|{upscale}|{extra_prompt or ''}".encode()
+            (
+                f"v{PIPELINE_VERSION}|{background}|{harmonize}|{preserve_car}|"
+                f"{relight}|{plate_blur}|{upscale}|{extra_prompt or ''}|"
+                f"watermark:{watermark_hash}"
+            ).encode()
         ).hexdigest()
 
         existing = await repo.find_existing_by_hash(input_hash, params_hash)
@@ -346,11 +388,9 @@ def _register_routes(app: FastAPI) -> None:
         await storage.put(input_key, body, file.content_type or "image/jpeg")
         original_url = storage.public_url(input_key)
 
-        if watermark is not None:
-            wm_bytes = await watermark.read()
-            if wm_bytes:
-                watermark_key = f"uploads/{job_id}_wm.png"
-                await storage.put(watermark_key, wm_bytes, watermark.content_type or "image/png")
+        if watermark_bytes:
+            watermark_key = f"uploads/{job_id}_wm.png"
+            await storage.put(watermark_key, watermark_bytes, watermark_content_type or "image/png")
 
         await repo.create(
             id=job_id,

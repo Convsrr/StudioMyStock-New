@@ -60,6 +60,8 @@ class Settings(BaseSettings):
     s3_access_key_id: str = ""
     s3_secret_access_key: str = ""
     s3_public_base_url: str = ""
+    s3_presigned_url_ttl_seconds: int = 3600
+    allow_public_local_storage: bool = False
 
     # API auth + rate limit
     api_keys: str = ""
@@ -81,6 +83,10 @@ class Settings(BaseSettings):
 
     # Skip segment/compose/shadow when input already looks like a studio shot
     enable_studio_shortcircuit: bool = True
+    # Production default is false because passthrough ignores the chosen
+    # background. Keep it as an explicit opt-in for demos or existing-studio
+    # polishing flows.
+    allow_studio_shortcircuit_passthrough: bool = False
 
     # Reflection stage (deterministic floor reflection under the car)
     enable_reflection: bool = True

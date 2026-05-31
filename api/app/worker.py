@@ -5,10 +5,7 @@ Run with:
 """
 from __future__ import annotations
 
-import asyncio
-
 from arq.connections import RedisSettings
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db import get_sessionmaker, init_db
 from .errors import StudioError
@@ -96,7 +93,7 @@ class WorkerSettings:
     functions = [process_job]
     on_startup = startup
     on_shutdown = shutdown
-    job_timeout = 300
+    job_timeout = get_settings().job_timeout_seconds
     max_tries = 3
     keep_result = 3600
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
