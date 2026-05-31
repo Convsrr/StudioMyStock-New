@@ -53,16 +53,20 @@ The orchestrator (`api/app/pipeline/orchestrator.py`) runs the stages in order. 
 | # | Stage | Module | What it does |
 |---|-------|--------|--------------|
 | 1 | decode | `decode.py` | Loads bytes, EXIF-rotates, caps to `WORKING_MAX_DIM`, returns RGB PIL image |
-| 2 | segment | `segment.py` (+ `picsart_client.py`, `replicate_client.py`) | Returns RGBA cutout. Provider chosen by `SEGMENTATION_PROVIDER` (`auto` prefers Picsart) |
-| 3 | refine_mask | `refine_mask.py` | Feathers and cleans the alpha edge so the cutout doesn't look stamped |
-| 4 | compose | `compose.py` (+ `contact.py`) | Detects wheel contact y on the cutout, anchors it to the preset's `floor_y_ratio`, scales car to ~78% width / 70% height |
-| 5 | shadow | `shadow.py` | Synthesizes a real perspective shadow from the silhouette using the preset's `light_direction` |
-| 6 | harmonize | `harmonize.py` | Sends the composite + scene prompt to Qwen Image Edit 2511 on Replicate. Returns a relit version of the whole frame |
-| 7 | preserve_car | `preserve_car.py` | Pastes the original car pixels back using the segmentation alpha, with a small luma shift toward the harmonized scene to avoid a "pasted" look |
-| 8 | plate_blur *(opt)* | `plate_blur.py` | Detects + blurs visible plates |
-| 9 | upscale *(opt)* | `upscale.py` | Real-ESRGAN to lift to `OUTPUT_MAX_DIM` |
-| 10 | watermark *(opt)* | `watermark.py` | Overlays a user-supplied PNG |
-| 11 | encode | (in `orchestrator.py`) | Progressive JPEG, 4:2:0 subsampling, configurable quality |
+| 2 | prep | `prep.py` | Gentle denoise, auto white balance, highlight recovery. Configurable via `ENABLE_PREP` |
+| 3 | scene_detect | `scene_detect.py` | Detects if the input already looks like a studio shot. Short-circuit is opt-in (`ALLOW_STUDIO_SHORTCIRCUIT_PASSTHROUGH=true`) so chosen backgrounds are honoured by default |
+| 4 | segment | `segment.py` (+ `picsart_client.py`, `replicate_client.py`) | Returns RGBA cutout. Provider chosen by `SEGMENTATION_PROVIDER` (`auto` prefers Picsart, falls back to Replicate). **Production fails loudly if no provider is configured.** |
+| 5 | refine_mask | `refine_mask.py` | Feathers and cleans the alpha edge so the cutout doesn't look stamped |
+| 6 | compose | `compose.py` (+ `contact.py`) | Detects wheel contact y on the cutout, anchors it to the preset's `floor_y_ratio`, scales car to ~78% width / 70% height. Picks landscape, square or portrait canvas from the input's aspect ratio |
+| 7 | shadow | `shadow.py` | Synthesizes a real perspective shadow from the silhouette using the preset's `light_direction` |
+| 8 | reflection | `reflection.py` | Deterministic floor reflection tinted to the sampled floor colour + chassis ambient occlusion blob |
+| 9 | harmonize | `harmonize.py` | Sends the composite + scene prompt to Qwen Image Edit 2511 on Replicate. Returns a relit version of the whole frame. Fallback/degradation is exposed via `stage_timings` (e.g. `harmonize_used_ai`, `warning_*` keys) |
+| 10 | quality_guard | `quality_guard.py` | Compares the deterministic composite to the AI output; falls back if a duplicate vehicle is suspected |
+| 11 | preserve_car | `preserve_car.py` | Pastes the original car pixels back using the segmentation alpha, with adaptive identity strength (chrome/glass get more AI lighting, plates/badges stay at full identity) |
+| 12 | plate_blur *(opt)* | `plate_blur.py` | Detects + blurs visible plates. **Production requires `REPLICATE_PLATE_DETECTOR` and fails visibly if the detector fails.** Falls back to a local heuristic in dev/CI |
+| 13 | upscale *(opt)* | `upscale.py` | Real-ESRGAN to lift to `OUTPUT_MAX_DIM` |
+| 14 | watermark *(opt)* | `watermark.py` | Overlays a user-supplied PNG. Watermark bytes + content type are included in the idempotency hash |
+| 15 | encode | (in `orchestrator.py`) | Progressive JPEG, 4:2:0 subsampling, configurable quality |
 
 ### Why harmonize → preserve_car instead of "just" relighting
 
@@ -70,14 +74,25 @@ Generative models produce beautifully lit scenes but subtly alter the car: plate
 
 If `harmonize=false`, the pipeline takes the classical fallback path: color-match the cutout to the background, optionally run IC-Light for relighting. Faster, cheaper, lower quality.
 
+### Extra prompts
+
+Users can supply an `extra_prompt` to tweak the scene (e.g. "make it warmer"). Extra prompts are:
+- Normalized (whitespace collapsed)
+- Capped at 500 characters
+- Placed *before* the final hard safety constraints in the Qwen prompt
+
+This ensures user preferences can never override the identity-preservation and one-car rules that sit at the end of the prompt.
+
 ## Background catalog
 
 `backgrounds.py` defines five presets. Each preset has:
 
-- `prompt` — fed to Qwen as the target scene description
+- `prompt` — short style cue fed to Qwen (the asset already shows the scene; the prompt just pins its character)
 - `floor_y_ratio` — where the floor line sits, used for compositing
 - `light_direction` — `top` / `top-left` / `top-right`, used for shadow synthesis
 - A pre-rendered JPG asset in `api/app/assets/backgrounds/` and a sized version cached in `api/storage/cache/backgrounds/`
+
+Cache keys now include the asset file's mtime, so replacing a background image on disk automatically invalidates the cache.
 
 To add a preset: append to `PRESETS`, drop in an asset image, optionally regenerate cached sizes via `scripts/render_backgrounds.py`.
 
@@ -85,8 +100,8 @@ To add a preset: append to `PRESETS`, drop in an asset image, optionally regener
 
 The `Storage` abstraction (`api/app/storage.py`) has two backends:
 
-- **LocalStorage** — files on disk under `STORAGE_DIR`, served by FastAPI's `StaticFiles` at `/static/<key>`
-- **S3Storage** — any S3-compatible service (AWS S3, Cloudflare R2, MinIO). Public URLs are constructed from `S3_PUBLIC_BASE_URL`
+- **LocalStorage** — files on disk under `STORAGE_DIR`, served by FastAPI's `StaticFiles` at `/static/<key>`. **Blocked in production** unless `ALLOW_PUBLIC_LOCAL_STORAGE=true` (local static files are public and ephemeral on most hosting).
+- **S3Storage** — any S3-compatible service (AWS S3, Cloudflare R2, MinIO). If `S3_PUBLIC_BASE_URL` is set, URLs are constructed from it. **If not set, URLs default to presigned URLs** (TTL controlled by `S3_PRESIGNED_URL_TTL_SECONDS`, default 1 hour) so private buckets work out of the box.
 
 Keys follow the pattern `uploads/<job_id>.<ext>` and `outputs/<job_id>.jpg`.
 
@@ -102,7 +117,7 @@ The schema is intentionally flat. No multi-tenant model yet — `api_key_hash` i
 
 Optional. Uses [arq](https://arq-docs.helpmanual.io/) on top of Redis. The producer side (`api/app/queue.py`) is configured to fail fast (`conn_retries=1`, `conn_timeout=1`) so when Redis is down, `enqueue_job_or_inline` falls back to inline processing without a noticeable delay.
 
-The worker is a separate process (`api/app/worker.py`, started by `run-worker.sh`). It calls the same `run_pipeline` function as the inline path.
+The worker is a separate process (`api/app/worker.py`, started by `run-worker.sh`). It calls the same `run_pipeline` function as the inline path. Worker job timeout is configurable via `JOB_TIMEOUT_SECONDS` (default 300s).
 
 ## Auth, rate limiting, observability
 
@@ -134,6 +149,16 @@ Each stage either succeeds or raises a typed error:
 - `RateLimitExceeded` → 429
 
 External calls (Replicate, Picsart) use `tenacity` with exponential backoff. Stuck jobs can be cleaned up with `api/scripts/fail_stuck_jobs.py`.
+
+### Production fail-loud policy
+
+In production (`APP_ENV=production`), the system fails loudly rather than silently degrading:
+
+- **Segmentation**: raises `PipelineError` if no provider is configured (no silent fallback to passthrough)
+- **Plate blur**: raises `PipelineError` if `REPLICATE_PLATE_DETECTOR` is not set or if the detector call fails
+- **Storage**: raises `RuntimeError` at startup if `STORAGE_BACKEND=local` without `ALLOW_PUBLIC_LOCAL_STORAGE=true`
+
+In development/CI, these same paths fall back gracefully (passthrough segmentation, heuristic plate detection, local disk) so end-to-end tests run without network access.
 
 ## Performance notes
 

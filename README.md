@@ -28,16 +28,20 @@ Each preset carries a scene prompt and a floor-line ratio so the car gets anchor
 ## Pipeline at a glance
 
 1. **decode** — load and normalize the input image
-2. **segment** — background removal (Picsart by default, Replicate as fallback)
-3. **refine_mask** — feather and clean the alpha edge
-4. **compose** — anchor the wheel contact line to the preset's floor line
-5. **shadow** — synthesize a real perspective shadow from the silhouette
-6. **harmonize** — Qwen Image Edit 2511 (Replicate) relights the whole composite
-7. **preserve_car** — paste the original car pixels back over the harmonized scene
-8. **plate_blur** *(optional)* — blur visible license plates
-9. **upscale** *(optional)* — Real-ESRGAN
-10. **watermark** *(optional)* — overlay a user-supplied logo
-11. **encode** — JPEG output (configurable quality)
+2. **prep** — gentle denoise, auto white balance, highlight recovery
+3. **scene_detect** — detect if the input is already a studio shot (opt-in short-circuit)
+4. **segment** — background removal (Picsart by default, Replicate as fallback; production fails loudly if unconfigured)
+5. **refine_mask** — feather and clean the alpha edge
+6. **compose** — anchor the wheel contact line to the preset's floor line
+7. **shadow** — synthesize a real perspective shadow from the silhouette
+8. **reflection** — deterministic floor reflection + chassis ambient occlusion
+9. **harmonize** — Qwen Image Edit 2511 (Replicate) relights the whole composite; fallback/degradation exposed in `stage_timings`
+10. **quality_guard** — detect AI-introduced duplicate cars, fall back to deterministic composite
+11. **preserve_car** — paste the original car pixels back over the harmonized scene
+12. **plate_blur** *(optional)* — blur visible license plates (production requires a configured detector)
+13. **upscale** *(optional)* — Real-ESRGAN
+14. **watermark** *(optional)* — overlay a user-supplied logo
+15. **encode** — JPEG output (configurable quality)
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for how the stages fit together and how the system handles jobs, storage, and failures. See [BUSINESS_DNA.md](./BUSINESS_DNA.md) for the product positioning and the principles every change should pass.
 
@@ -97,16 +101,20 @@ App runs on http://localhost:3000.
 
 Auth: set `API_KEYS=key1,key2` in env to require an `X-API-Key` header. Empty value disables auth (dev only).
 
-Idempotency: identical input bytes + identical params return the previously succeeded job instead of creating a new one.
+Idempotency: identical input bytes + identical params (including watermark bytes and content type) return the previously succeeded job instead of creating a new one.
 
 ## Configuration
 
 The full set of env keys is in [`api/.env.example`](./api/.env.example). Highlights:
 
 - `REPLICATE_API_TOKEN`, `PICSART_API_KEY` — provider credentials
-- `SEGMENTATION_PROVIDER` — `auto` (default), `picsart`, `replicate`, or `none`
+- `SEGMENTATION_PROVIDER` — `auto` (default), `picsart`, `replicate`, or `none`. In production, `none` raises an error.
+- `REPLICATE_PLATE_DETECTOR` — model ref for plate detection. Required in production if `plate_blur` is used.
 - `INLINE_PROCESSING` — `true` to bypass Redis even when configured
-- `STORAGE_BACKEND` — `local` or `s3` (S3-compatible: AWS, R2, MinIO)
+- `STORAGE_BACKEND` — `local` or `s3` (S3-compatible: AWS, R2, MinIO). Local storage is blocked in production unless `ALLOW_PUBLIC_LOCAL_STORAGE=true`.
+- `S3_PUBLIC_BASE_URL` — if empty, S3 URLs default to presigned URLs (TTL controlled by `S3_PRESIGNED_URL_TTL_SECONDS`, default 3600s)
+- `ALLOW_STUDIO_SHORTCIRCUIT_PASSTHROUGH` — `false` by default; the studio short-circuit that skips segment/compose is opt-in so chosen backgrounds are always honoured
+- `JOB_TIMEOUT_SECONDS` — worker job timeout (default 300s)
 - `RATE_LIMIT_PER_MINUTE` — per-IP rate limit on `/api/process`
 - `JPEG_QUALITY`, `OUTPUT_MAX_DIM` — output quality knobs
 
@@ -118,7 +126,9 @@ source .venv/bin/activate
 pytest -q
 ```
 
-Tests use a temporary SQLite DB and stub external providers, so no API keys are required to run them.
+Tests use a temporary SQLite DB and stub external providers, so no API keys are required to run them. `PICSART_API_KEY` is explicitly cleared in the test conftest to prevent accidental network calls.
+
+Test coverage includes regression tests for production-readiness behaviours: idempotency hashing, segmentation enforcement, plate blur enforcement, storage backend restrictions, harmonize fallback exposure, and worker timeout configuration.
 
 ## License
 

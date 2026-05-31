@@ -64,11 +64,13 @@ FastAPI, Postgres-or-SQLite, Redis-or-inline, S3-or-disk. No exotic dependencies
 
 ### 6. Determinism wherever we can get it
 
-Same input + same params should give the same output. We cache, hash, and version every external model. When a provider releases a new model version we pin and compare before adopting.
+Same input + same params should give the same output. We cache, hash, and version every external model. When a provider releases a new model version we pin and compare before adopting. The idempotency hash includes watermark bytes and content type, background asset mtimes feed into cache keys, and the pipeline version counter (`PIPELINE_VERSION`) invalidates old cached results when the rendering logic changes.
 
 ### 7. Fail loud, recover quietly
 
 External providers will fail. The pipeline retries with backoff, falls back to alternative providers (e.g. Picsart → Replicate for segmentation), and surfaces a typed error to the API if it can't recover. Stuck jobs are cleaned up by a cron script.
+
+In production, critical stages (segmentation, plate blur) refuse to silently degrade — they raise visible errors so operators know immediately. Harmonize fallback/degradation is exposed in `stage_timings` so monitoring can track when the AI path wasn't used. In development, the same stages fall back gracefully so the team can iterate without API keys.
 
 ### 8. Respect the dealer's brand
 
